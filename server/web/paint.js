@@ -8,6 +8,7 @@
   const statusEl = document.getElementById("status");
   const coordsEl = document.getElementById("coords");
   const onlineEl = document.getElementById("online");
+  const textInput = document.getElementById("text");
 
   let gridW = 120, gridH = 84;
   let cells = new Uint8Array(gridW * gridH);
@@ -17,7 +18,6 @@
   let color = 1;
   let tool = "brush";
   let size = 1;
-  let fill = false;
   let readyAt = 0;
   let hover = null;
   let stroke = null; // { start, last, cells: Set of indices }
@@ -48,13 +48,14 @@
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
       const cw = canvas.width / gridW;
-      if (stroke) {
+      const preview = stroke ? stroke.cells : tool === "text" && hover && !pointers.size ? textCells(hover) : null;
+      if (preview) {
         const [r, g, b] = COLORS[paintColor()];
         ctx.fillStyle = `rgb(${r},${g},${b})`;
-        for (const i of stroke.cells) ctx.fillRect((i % gridW) * cw, Math.floor(i / gridW) * cw, cw, cw);
+        for (const i of preview) ctx.fillRect((i % gridW) * cw, Math.floor(i / gridW) * cw, cw, cw);
       }
       if (layer && layer.complete) ctx.drawImage(layer, 0, 0, canvas.width, canvas.height);
-      if (hover && tool !== "move") {
+      if (hover && tool !== "move" && tool !== "text") {
         const [x0, y0] = brushOrigin(hover.x, hover.y);
         ctx.lineWidth = 2;
         ctx.strokeStyle = paintColor() === 2 ? "#000" : "#f00";
@@ -106,22 +107,7 @@
     }
   }
 
-  function box(a, b) {
-    const set = new Set();
-    const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
-    const y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
-    if (fill) {
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set.add(y * gridW + x);
-    } else {
-      line(set, { x: x0, y: y0 }, { x: x1, y: y0 });
-      line(set, { x: x1, y: y0 }, { x: x1, y: y1 });
-      line(set, { x: x1, y: y1 }, { x: x0, y: y1 });
-      line(set, { x: x0, y: y1 }, { x: x0, y: y0 });
-    }
-    return set;
-  }
-
-  // Ellipse inside the box from a to b.
+  // Ellipse outline inside the box from a to b.
   function circle(a, b) {
     const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
     const y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
@@ -133,18 +119,53 @@
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         if (!inside(x, y)) continue;
-        const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
-        if (fill) set.add(y * gridW + x);
-        else if (edge) stamp(set, x, y);
+        if (!inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1)) stamp(set, x, y);
       }
     }
     return set;
   }
 
+  // 5×7 font for ASCII 32–126: five column bytes per glyph, bit 0 at the top.
+  const FONT =
+    "0000000000" + "00005f0000" + "0007000700" + "147f147f14" + "242a7f2a12" + "2313086462" + "3649552250" + "0005030000" +
+    "001c224100" + "0041221c00" + "082a1c2a08" + "08083e0808" + "0050300000" + "0808080808" + "0060600000" + "2010080402" +
+    "3e5149453e" + "00427f4000" + "4261514946" + "2141454b31" + "1814127f10" + "2745454539" + "3c4a494930" + "0171090503" +
+    "3649494936" + "064949291e" + "0036360000" + "0056360000" + "0814224100" + "1414141414" + "0041221408" + "0201510906" +
+    "324979413e" + "7e1111117e" + "7f49494936" + "3e41414122" + "7f4141221c" + "7f49494941" + "7f09090101" + "3e41415132" +
+    "7f0808087f" + "00417f4100" + "2040413f01" + "7f08142241" + "7f40404040" + "7f0204027f" + "7f0408107f" + "3e4141413e" +
+    "7f09090906" + "3e4151215e" + "7f09192946" + "4649494931" + "01017f0101" + "3f4040403f" + "1f2040201f" + "7f2018207f" +
+    "6314081463" + "0304780403" + "6151494543" + "007f414100" + "0204081020" + "0041417f00" + "0402010204" + "4040404040" +
+    "0001020400" + "2054545478" + "7f48444438" + "3844444420" + "384444487f" + "3854545418" + "087e090102" + "081454543c" +
+    "7f08040478" + "00447d4000" + "2040443d00" + "007f102844" + "00417f4000" + "7c04180478" + "7c08040478" + "3844444438" +
+    "7c14141408" + "081414187c" + "7c08040408" + "4854545420" + "043f444020" + "3c4040207c" + "1c2040201c" + "3c4030403c" +
+    "4428102844" + "0c5050503c" + "4464544c44" + "0008364100" + "00007f0000" + "0041360800" + "0201020402";
+
+  function textCells(at) {
+    const set = new Set();
+    let cx = at.x;
+    for (const ch of textInput.value) {
+      let code = ch.charCodeAt(0);
+      if (code < 32 || code > 126) code = 63; // "?"
+      for (let col = 0; col < 5; col++) {
+        const bits = parseInt(FONT.substr(((code - 32) * 5 + col) * 2, 2), 16);
+        for (let row = 0; row < 7; row++) {
+          if (!(bits >> row & 1)) continue;
+          for (let dy = 0; dy < size; dy++) {
+            for (let dx = 0; dx < size; dx++) {
+              const x = cx + col * size + dx, y = at.y + row * size + dy;
+              if (x >= 0 && y >= 0 && x < gridW && y < gridH) set.add(y * gridW + x);
+            }
+          }
+        }
+      }
+      cx += 6 * size;
+    }
+    return set;
+  }
+
   function shapeCells(start, end) {
-    if (tool === "line") { const s = new Set(); line(s, start, end); return s; }
-    if (tool === "box") return box(start, end);
     if (tool === "circle") return circle(start, end);
+    if (tool === "text") return textCells(end);
     return null;
   }
 
@@ -330,6 +351,8 @@
     cancelStroke();
     viewport.style.cursor = t === "move" ? "grab" : "crosshair";
     pressGroup("[data-tool]", (b) => b.dataset.tool === t);
+    textInput.hidden = t !== "text";
+    if (t === "text") textInput.focus();
     redraw();
   }
   function pickSize(s) {
@@ -338,23 +361,16 @@
     redraw();
   }
   const SIZES = [...document.querySelectorAll("[data-size]")].map((b) => Number(b.dataset.size));
-  const fillButton = document.getElementById("fill");
-  function toggleFill() {
-    fill = !fill;
-    fillButton.setAttribute("aria-pressed", String(fill));
-  }
-
   document.querySelectorAll(".swatch").forEach((b) => b.addEventListener("click", () => pickColor(Number(b.dataset.c))));
   document.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => pickTool(b.dataset.tool)));
   document.querySelectorAll("[data-size]").forEach((b) => b.addEventListener("click", () => pickSize(Number(b.dataset.size))));
-  fillButton.addEventListener("click", toggleFill);
+  textInput.addEventListener("input", redraw);
 
-  const KEYS = { b: "brush", e: "eraser", l: "line", r: "box", o: "circle", m: "move" };
+  const KEYS = { b: "brush", e: "eraser", o: "circle", t: "text", m: "move" };
   window.addEventListener("keydown", (e) => {
     if (e.target.closest("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key >= "1" && e.key <= "3") pickColor(Number(e.key) - 1);
-    else if (KEYS[e.key]) pickTool(KEYS[e.key]);
-    else if (e.key === "f") toggleFill();
+    else if (KEYS[e.key]) { e.preventDefault(); pickTool(KEYS[e.key]); }
     else if (e.key === "[" || e.key === "]") {
       const i = SIZES.indexOf(size) + (e.key === "]" ? 1 : -1);
       if (i >= 0 && i < SIZES.length) pickSize(SIZES[i]);
