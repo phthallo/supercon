@@ -67,6 +67,15 @@ half_frame_one_color_size = const(display_height * display_width // (8 * 2))
 display_width_bytes = const(display_width // 8)
 display_half_width_bytes = const(display_width_bytes // 2)
 
+# Delta frames keep the DC/DC booster running between frames; these bound how long it stays up.
+_SESSION_IDLE_MS = const(3000)
+_SESSION_MAX_FRAMES = const(20)
+# The delta waveform isn't DC-balanced per pixel, so after this many delta frames one frame
+# goes through the full waveform instead.
+_CLEAN_EVERY = const(300)
+# A delta refresh takes ~580 ms. A refresh still running after this is hung.
+_DELTA_TIMEOUT_MS = const(4000)
+
 
 # Two displays use different bit orders
 def reverse_byte(byte: int) -> int:
@@ -144,8 +153,8 @@ class EPaperDisplay:
         EPD_CS1_PIN.value(True)
         EPD_CS2_PIN.value(True)
         # miso must be named: left out, SPI2 claims its default MISO, GPIO13, which is CS1 on this board.
-        # 4 MHz is the plane rate in documentation/itc97-driver-sheets.pdf.
-        spi_args = dict(baudrate=4_000_000, sck=EPD_SCL_PIN, mosi=EPD_SDA_PIN, miso=EPD_SPI_MISO_PIN)
+        # The sheet's plane rate is 4 MHz; 16 MHz was measured clean on the badge (85 ms for both planes).
+        spi_args = dict(baudrate=16_000_000, sck=EPD_SCL_PIN, mosi=EPD_SDA_PIN, miso=EPD_SPI_MISO_PIN)
         self.spi = SPI(2, **spi_args)
         # SPI2 state survives a soft reset, and re-creating it with the same settings skips
         # routing the pins, which Pin() above has just reset. deinit forces a full setup.
@@ -163,6 +172,16 @@ class EPaperDisplay:
         self._reverse_fb_bits = self._driver_b
         # Unknown at boot, so assume red is showing and must be cleared.
         self._screen_red = True
+        # The black plane on the film, as last sent; valid only while _film_ok.
+        self._film = (bytearray(half_frame_one_color_size), bytearray(half_frame_one_color_size))
+        self._film_ok = False
+        self._delta_frames = 0
+        # A delta session is open: COG initialised and booster running, so a frame is planes + 0x15.
+        self._hot = False
+        self._session_frames = 0
+        self._last_frame = 0
+        # A delta refresh is still running on the panel.
+        self._inflight = False
 
         # The framebuffers are set and display should be updated.
         self._framebuffer_ready = aio.Event()
@@ -264,6 +283,8 @@ class EPaperDisplay:
                 await self.global_update(black_left, red_left, black_right, red_right)
                 gc.collect()
                 self._display_updated.set()
+            elif self._hot and time.ticks_diff(time.ticks_ms(), self._last_frame) > _SESSION_IDLE_MS:
+                await self._close_session()
             await aio.sleep_ms(20)
 
     async def global_update(
@@ -273,11 +294,34 @@ class EPaperDisplay:
         black_right: bytearray | bytes | memoryview[int],
         red_right: bytearray | bytes | memoryview[int],
     ):
-        start = time.ticks_ms()
         has_red = bool(
             _any_set(red_left, half_frame_one_color_size)
             or _any_set(red_right, half_frame_one_color_size)
         )
+        waited = time.ticks_ms()
+        await self._finish()
+        start = time.ticks_ms()
+        waited = time.ticks_diff(start, waited)
+        # Delta needs the film's exact contents, and its waveform can't move red pigment.
+        delta = (
+            self._driver_b and self._film_ok and not has_red and not self._screen_red
+            and self._delta_frames < _CLEAN_EVERY
+        )
+        if delta:
+            sent = await self._delta_update(black_left, black_right)
+            print(
+                "epd: delta sent in", time.ticks_diff(sent, start),
+                "ms after waiting", waited, "ms for the previous refresh",
+            )
+        else:
+            sent = await self._full_update(black_left, red_left, black_right, red_right, has_red)
+            print(
+                "epd: full sent in", time.ticks_diff(sent, start),
+                "ms, refreshed in", time.ticks_diff(time.ticks_ms(), sent), "ms",
+            )
+
+    async def _full_update(self, black_left, red_left, black_right, red_right, has_red: bool):
+        await self._close_session()
         await self._reset()
         self._send_images(black_left, red_left, black_right, red_right)
         sent = time.ticks_ms()
@@ -286,10 +330,66 @@ class EPaperDisplay:
         await self._display_refresh(has_red)
         await self._dcdc_soft_shutdown()
         self._screen_red = has_red
-        print(
-            "epd: sent in", time.ticks_diff(sent, start),
-            "ms, refreshed in", time.ticks_diff(time.ticks_ms(), sent), "ms",
-        )
+        self._delta_frames = 0
+        self._film_ok = self._driver_b and not has_red
+        if self._film_ok:
+            self._film[0][:] = black_left
+            self._film[1][:] = black_right
+        return sent
+
+    async def _delta_update(self, black_left, black_right):
+        """Redraw only the pixels that changed: the previous frame goes in the red plane.
+
+        Returns once the refresh has started, so the next frame can be drawn while the panel
+        runs it. Caller must have awaited _finish(): planes sent while the panel is busy are dropped.
+        """
+        film_left, film_right = self._film
+        if self._session_frames >= _SESSION_MAX_FRAMES:
+            await self._close_session()
+        if self._hot:
+            self._send_images(black_left, film_left, black_right, film_right)
+            sent = time.ticks_ms()
+        else:
+            await self._reset()
+            self._send_images(black_left, film_left, black_right, film_right)
+            sent = time.ticks_ms()
+            await self.cog_initial(luts.LUTB_DELTA)
+            await self._dcdc_soft_start()
+            self._hot = True
+            self._session_frames = 0
+        self._send_index_data(0x15, [0x3C])
+        await self._wait_busy(50)
+        self._inflight = True
+        film_left[:] = black_left
+        film_right[:] = black_right
+        self._session_frames += 1
+        self._delta_frames += 1
+        self._last_frame = time.ticks_ms()
+        return sent
+
+    async def _finish(self):
+        """Wait for a refresh a delta frame left running. A hung one resets the controller."""
+        if not self._inflight:
+            return
+        self._inflight = False
+        if not await self._wait_ready(_DELTA_TIMEOUT_MS):
+            self._abort()
+
+    async def _close_session(self):
+        await self._finish()
+        if self._hot:
+            self._hot = False
+            await self._dcdc_soft_shutdown()
+
+    def _abort(self):
+        """A refresh never finished: hold the COG in reset and forget what the film shows."""
+        EPD_RST_PIN.value(False)
+        EPD_CS1_PIN.value(True)
+        EPD_CS2_PIN.value(True)
+        self._hot = False
+        self._film_ok = False
+        self._screen_red = True
+        print("epd: refresh timed out, controller reset")
 
     def _waveform(self, has_red: bool) -> bytes | None:
         """None keeps the OTP waveform."""
@@ -393,9 +493,13 @@ class EPaperDisplay:
         EPD_CS2_PIN.value(True)
 
     async def _wait_ready(self, timeout_ms: int = 180_000):
+        """Wait for the panel to finish. False if it was still busy at the timeout."""
         start = time.ticks_ms()
-        while _busy() and time.ticks_diff(time.ticks_ms(), start) < timeout_ms:
-            await aio.sleep_ms(10)
+        while _busy():
+            if time.ticks_diff(time.ticks_ms(), start) >= timeout_ms:
+                return False
+            await aio.sleep_ms(1)
+        return True
 
     async def _wait_busy(self, timeout_ms: int):
         """Wait for the panel to report busy. False if it never did."""
@@ -403,7 +507,7 @@ class EPaperDisplay:
         while not _busy():
             if time.ticks_diff(time.ticks_ms(), start) >= timeout_ms:
                 return False
-            await aio.sleep_ms(5)
+            await aio.sleep_ms(1)
         return True
 
     async def _display_refresh(self, has_red: bool):
@@ -431,6 +535,9 @@ class EPaperDisplay:
         await aio.sleep_ms(100)
         EPD_CS1_PIN.value(True)
         EPD_CS2_PIN.value(True)
+        if self._driver_b:
+            # Booster setting, errata 9 of the iTC 9.7" app note: without it a B1 draws ~2 A per refresh.
+            self._send_index_data(0x70, [0x71, 0x36])
 
     def _send_images(
         self,

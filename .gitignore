@@ -5,3 +5,4 @@ __pycache__
 overlays/*/data/wifi.json
 server/ink
 server/*.db*
+badge-epd-kit.zip

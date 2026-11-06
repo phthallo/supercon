@@ -39,3 +39,34 @@ LUTB = bytes.fromhex(
     "000101010101010100010101010101010001010101010101000101010101010100010101010101010001010101010101"
     "00010101010101010001010101010101"
 )
+
+_GND = 0
+_VDH = 1  # towards black
+_VDL = 2  # towards white
+
+
+def _steps(tables):
+    """Driver B table of 10 groups x 2 frames: 20 frames of ~29 ms, ~580 ms in all.
+
+    tables maps a table index to 10 (first half, second half) levels; the others stay at ground.
+    Group bytes: level (2 bits per phase), on1, off1, ph2a, on2, off2, ph2b, repeat. A zero
+    on, ph2 or repeat count makes the group run for ~4 s, so 2 frames is the shortest group.
+    """
+    out = bytearray(400)
+    for o in range(0, 400, 8):
+        out[o + 1 : o + 8] = b"\x01\x00\x01\x01\x00\x01\x01"
+    for t, levels in tables.items():
+        for g, (a, c) in enumerate(levels):
+            out[(t * 10 + g) * 8] = a << 6 | a << 4 | c << 2 | c
+    return bytes(out)
+
+
+# Driver B, change-only. The red plane carries the previous frame, so table = (old << 1) | new.
+# Black needs ~18 frames of VDH and white more than that; unchanged pixels get a short push
+# towards their own colour, which fades grey left by earlier frames without a visible flicker.
+LUTB_DELTA = _steps({
+    0: [(_GND, _GND)] * 7 + [(_VDL, _VDL)] * 3,  # stays white
+    1: [(_VDL, _VDH)] + [(_VDH, _VDH)] * 9,  # white to black
+    2: [(_VDH, _VDL)] + [(_VDL, _VDL)] * 9,  # black to white
+    3: [(_GND, _GND)] * 8 + [(_VDH, _GND)] * 2,  # stays black
+})
