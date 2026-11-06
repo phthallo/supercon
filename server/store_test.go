@@ -36,6 +36,9 @@ func TestOpenStoreUpscalesOldCanvas(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, old); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.db.Exec(`PRAGMA user_version = 0`); err != nil {
+		t.Fatal(err)
+	}
 	s.Close()
 
 	s, err = OpenStore(path)
@@ -45,8 +48,8 @@ func TestOpenStoreUpscalesOldCanvas(t *testing.T) {
 	defer s.Close()
 	c := s.Canvas()
 	for _, p := range [][2]int{{4, 2}, {5, 2}, {4, 3}, {5, 3}} {
-		if c[p[1]*GridW+p[0]] != Red {
-			t.Fatalf("cell %v not red after upscale", p)
+		if c[p[1]*GridW+p[0]] != Black {
+			t.Fatalf("cell %v not upscaled and turned black", p)
 		}
 	}
 	if c[2*GridW+6] != White || c[1*GridW+4] != White {
