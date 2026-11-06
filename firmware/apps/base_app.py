@@ -10,6 +10,9 @@ class BaseApp:
     Exists to make it easier to make app-generic behaviors.
     """
 
+    owns_menu_buttons = False
+    """True: Menu + and Menu - go to the app, and the app menu opens only when both are held for 500 ms."""
+
     def __init__(self, name: str | None = None) -> None:
         self.name = name or self.__class__.__name__
         self.sleep_ms = 100

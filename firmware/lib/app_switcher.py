@@ -9,7 +9,8 @@ from apps.base_app import BaseApp
 from lib.button import MenuMinus, MenuPlus, UserA, UserB, PRESSED_READ
 from lib.led_bar import leds
 
-# MENU_TIMEOUT_MILLISECONDS = 1000
+# Apps with owns_menu_buttons give the menu back when both buttons are held this long.
+_CHORD_HOLD_MS = 500
 
 
 APPMOD_DENYLIST = {
@@ -100,7 +101,14 @@ class AppSwitcher:
                     self.selecting_mode = False
                 await aio.sleep_ms(10)
             else:
-                if MenuMinus.pressed() or MenuPlus.pressed():
+                app = self.apps[self.active_idx]
+                if app.owns_menu_buttons:
+                    open_menu = (
+                        MenuMinus.pressed_ms() >= _CHORD_HOLD_MS and MenuPlus.pressed_ms() >= _CHORD_HOLD_MS
+                    )
+                else:
+                    open_menu = MenuMinus.pressed() or MenuPlus.pressed()
+                if open_menu:
                     self.selection_idx = self.active_idx
                     self.selecting_mode = True
                     ## Reset pressed state so that button doesn't advance menu, just enters menu state
