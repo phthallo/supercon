@@ -204,7 +204,7 @@ func (s *Server) handlePixel(w http.ResponseWriter, r *http.Request) {
 		P [][2]int
 		C uint8
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}

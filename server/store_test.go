@@ -24,3 +24,32 @@ func TestPaintReturnsChangedCells(t *testing.T) {
 		t.Fatalf("cell (5,3) = %d, want black", got)
 	}
 }
+
+func TestOpenStoreUpscalesOldCanvas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ink.db")
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := make([]byte, 120*84)
+	old[1*120+2] = Red
+	if _, err := s.db.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, old); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	s, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c := s.Canvas()
+	for _, p := range [][2]int{{4, 2}, {5, 2}, {4, 3}, {5, 3}} {
+		if c[p[1]*GridW+p[0]] != Red {
+			t.Fatalf("cell %v not red after upscale", p)
+		}
+	}
+	if c[2*GridW+6] != White || c[1*GridW+4] != White {
+		t.Fatal("upscale spilled past the 2x2 block")
+	}
+}

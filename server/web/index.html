@@ -36,34 +36,35 @@
         </div>
       </div>
       <div class="toolbar">
-        <div class="group" role="radiogroup" aria-label="colour">
-          <button class="link swatch" style="--sw:#fff" data-c="0" aria-pressed="false" type="button">[ white ]</button>
-          <button class="link swatch" style="--sw:#000" data-c="1" aria-pressed="true" type="button">[ black ]</button>
-          <button class="link swatch" style="--sw:#f00" data-c="2" aria-pressed="false" type="button">[ red ]</button>
+        <div class="tools">
+          <div class="group" aria-label="tool">
+            <button class="icon" data-tool="brush" type="button" title="Brush (B)" aria-label="brush"><svg viewBox="0 0 24 24"><path d="M4 20l1-5L16 4l4 4L9 19z M14 6l4 4"/></svg></button>
+            <button class="icon" data-tool="eraser" type="button" title="Eraser (E)" aria-label="eraser"><svg viewBox="0 0 24 24"><path d="M10 20h10 M4 15l9-9 6 6-8 8H9z M8 11l6 6"/></svg></button>
+            <button class="icon" data-tool="circle" type="button" title="Circle (O): drag corner to corner" aria-label="circle"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></button>
+            <button class="icon" data-tool="text" type="button" title="Text (T)" aria-label="text"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2 M12 4v16 M9 20h6"/></svg></button>
+            <button class="icon" data-tool="move" type="button" title="Move (M), or hold space" aria-label="move"><svg viewBox="0 0 24 24"><path d="M12 3v18 M3 12h18 M9 6l3-3 3 3 M9 18l3 3 3-3 M6 9l-3 3 3 3 M18 9l3 3-3 3"/></svg></button>
+          </div>
+          <div class="group" aria-label="colour">
+            <button class="chip swatch" style="--sw:#fff" data-c="0" type="button" title="White (1)" aria-label="white"></button>
+            <button class="chip swatch" style="--sw:#000" data-c="1" type="button" title="Black (2)" aria-label="black"></button>
+            <button class="chip swatch" style="--sw:#f00" data-c="2" type="button" title="Red (3)" aria-label="red"></button>
+          </div>
+          <div class="group" id="sizes" aria-label="size">
+            <button class="icon" data-size="1" type="button" title="Size 1 ([ and ] to change)" aria-label="size 1"><span class="dot" style="--d:3px"></span></button>
+            <button class="icon" data-size="2" type="button" title="Size 2" aria-label="size 2"><span class="dot" style="--d:6px"></span></button>
+            <button class="icon" data-size="4" type="button" title="Size 4" aria-label="size 4"><span class="dot" style="--d:10px"></span></button>
+            <button class="icon" data-size="8" type="button" title="Size 8" aria-label="size 8"><span class="dot" style="--d:16px"></span></button>
+          </div>
+          <input id="text" class="text-input" maxlength="40" placeholder="your text" aria-label="text to place" hidden>
+          <div class="group zoom">
+            <button class="icon" id="zoom-in" type="button" title="Zoom in" aria-label="zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></svg></button>
+            <button class="icon" id="zoom-out" type="button" title="Zoom out" aria-label="zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+            <button class="icon" id="zoom-reset" type="button" title="Fit" aria-label="fit"><svg viewBox="0 0 24 24"><path d="M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5"/></svg></button>
+          </div>
         </div>
-        <div class="group" aria-label="tool">
-          <button class="link" data-tool="brush" type="button">[ brush ]</button>
-          <button class="link" data-tool="eraser" type="button">[ eraser ]</button>
-          <button class="link" data-tool="circle" type="button">[ circle ]</button>
-          <button class="link" data-tool="text" type="button">[ text ]</button>
-          <button class="link" data-tool="move" type="button">[ move ]</button>
-          <input id="text" class="text-input" maxlength="40" placeholder="hello supercon" aria-label="text to place" hidden>
-        </div>
-        <div class="group" aria-label="size">
-          <span class="muted">size</span>
-          <button class="link" data-size="1" type="button">[ 1 ]</button>
-          <button class="link" data-size="2" type="button">[ 2 ]</button>
-          <button class="link" data-size="4" type="button">[ 4 ]</button>
-          <button class="link" data-size="8" type="button">[ 8 ]</button>
-        </div>
-        <div class="group">
+        <div class="statusbar">
           <span id="status" class="status" aria-live="polite">loading…</span>
           <span id="coords" class="muted">x – y –</span>
-        </div>
-        <div class="group">
-          <button class="link" id="zoom-in" type="button" aria-label="zoom in">[ + ]</button>
-          <button class="link" id="zoom-out" type="button" aria-label="zoom out">[ − ]</button>
-          <button class="link" id="zoom-reset" type="button">[ fit ]</button>
         </div>
       </div>
     </section>

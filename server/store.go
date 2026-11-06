@@ -122,6 +122,18 @@ CREATE TABLE IF NOT EXISTS widgets (
 	} else if err != nil {
 		return nil, err
 	}
+	// The grid was 120×84 before the cells were halved to 4 panel pixels.
+	if oldW, oldH := 120, 84; len(s.canvas) == oldW*oldH && oldW*2 == GridW && oldH*2 == GridH {
+		up := make([]byte, GridW*GridH)
+		for i := range up {
+			x, y := i%GridW, i/GridW
+			up[i] = s.canvas[(y/2)*oldW+x/2]
+		}
+		if _, err := db.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, up); err != nil {
+			return nil, err
+		}
+		s.canvas = up
+	}
 	if len(s.canvas) != GridW*GridH {
 		return nil, fmt.Errorf("canvas blob is %d bytes, want %d", len(s.canvas), GridW*GridH)
 	}

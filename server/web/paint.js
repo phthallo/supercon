@@ -1,6 +1,6 @@
 (() => {
   const COLORS = [[255, 255, 255], [0, 0, 0], [255, 0, 0]];
-  const MAX_CELLS = 2500;
+  const MAX_CELLS = 10000;
   const viewport = document.getElementById("viewport");
   const stage = document.getElementById("stage");
   const canvas = document.getElementById("canvas");
@@ -10,7 +10,7 @@
   const onlineEl = document.getElementById("online");
   const textInput = document.getElementById("text");
 
-  let gridW = 120, gridH = 84;
+  let gridW = 240, gridH = 168;
   let cells = new Uint8Array(gridW * gridH);
   let off = document.createElement("canvas");
   let offCtx, offImg;
@@ -317,6 +317,7 @@
     }
     const prev = idx.map((i) => cells[i]);
     idx.forEach((i) => { cells[i] = c; putCell(i, c); });
+    if (tool === "text") textInput.value = "";
     redraw();
     message = null;
     try {
@@ -352,14 +353,19 @@
     viewport.style.cursor = t === "move" ? "grab" : "crosshair";
     pressGroup("[data-tool]", (b) => b.dataset.tool === t);
     textInput.hidden = t !== "text";
+    sizeGroup.hidden = t === "move";
     if (t === "text") textInput.focus();
+    if (toolSize[t]) pickSize(toolSize[t]);
     redraw();
   }
   function pickSize(s) {
     size = s;
+    if (toolSize[tool]) toolSize[tool] = s;
     pressGroup("[data-size]", (b) => Number(b.dataset.size) === s);
     redraw();
   }
+  const toolSize = { brush: 1, eraser: 4, circle: 1, text: 1 };
+  const sizeGroup = document.getElementById("sizes");
   const SIZES = [...document.querySelectorAll("[data-size]")].map((b) => Number(b.dataset.size));
   document.querySelectorAll(".swatch").forEach((b) => b.addEventListener("click", () => pickColor(Number(b.dataset.c))));
   document.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => pickTool(b.dataset.tool)));
@@ -381,7 +387,7 @@
     if (e.key === " ") { spaceHeld = false; viewport.style.cursor = tool === "move" ? "grab" : "crosshair"; }
   });
   pickTool("brush");
-  pickSize(1);
+  pressGroup(".swatch", (b) => Number(b.dataset.c) === color);
 
   // ---- cooldown ------------------------------------------------------------
   function showError(text) {

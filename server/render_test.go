@@ -27,22 +27,22 @@ func unpack(t *testing.T, frame []byte) []byte {
 
 func TestPackFrameBitOrder(t *testing.T) {
 	canvas := make([]byte, GridW*GridH)
-	canvas[0] = Black       // panel pixels x 0-7, y 0-7
-	canvas[1*GridW+2] = Red // x 16-23, y 8-15
+	canvas[0] = Black       // panel pixels x 0-3, y 0-3
+	canvas[1*GridW+2] = Red // x 8-11, y 4-7
 	planes := unpack(t, PackFrame(Render(canvas, nil)))
 	black, red := planes[:PlaneSize], planes[PlaneSize:]
 
 	rowBytes := PanelW / 8
-	if black[0] != 0xff || black[1] != 0 || red[0] != 0 {
+	if black[0] != 0xf0 || black[1] != 0 || red[0] != 0 {
 		t.Fatalf("cell 0: black[0]=%#x black[1]=%#x red[0]=%#x", black[0], black[1], red[0])
 	}
-	if black[8*rowBytes] != 0 {
-		t.Fatalf("cell 0 leaked into row 8")
+	if black[4*rowBytes] != 0 {
+		t.Fatalf("cell 0 leaked into row 4")
 	}
-	if got := red[8*rowBytes+2]; got != 0xff {
-		t.Fatalf("red cell: byte = %#x, want 0xff", got)
+	if got := red[4*rowBytes+1]; got != 0xf0 {
+		t.Fatalf("red cell: byte = %#x, want 0xf0", got)
 	}
-	if got := black[8*rowBytes+2]; got != 0 {
+	if got := black[4*rowBytes+1]; got != 0 {
 		t.Fatalf("red cell also set black: %#x", got)
 	}
 }
