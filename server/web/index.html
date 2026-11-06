@@ -27,7 +27,7 @@
   </header>
 
   <main>
-    <p>Paint here and it shows up on Supercon badges! You get <b>one pixel every <span id="cooldown">30</span>s</b> :]</p>
+    <p>Paint here and it shows up on Supercon badges!<span id="cooldown-note" hidden> You get <b>one stroke every <span id="cooldown">30</span>s</b> :]</span></p>
 
     <section id="paint" aria-label="canvas">
       <div class="stage-wrap" id="viewport">
@@ -40,6 +40,22 @@
           <button class="link swatch" style="--sw:#fff" data-c="0" aria-pressed="false" type="button">[ white ]</button>
           <button class="link swatch" style="--sw:#000" data-c="1" aria-pressed="true" type="button">[ black ]</button>
           <button class="link swatch" style="--sw:#f00" data-c="2" aria-pressed="false" type="button">[ red ]</button>
+        </div>
+        <div class="group" aria-label="tool">
+          <button class="link" data-tool="brush" type="button">[ brush ]</button>
+          <button class="link" data-tool="eraser" type="button">[ eraser ]</button>
+          <button class="link" data-tool="line" type="button">[ line ]</button>
+          <button class="link" data-tool="box" type="button">[ box ]</button>
+          <button class="link" data-tool="circle" type="button">[ circle ]</button>
+          <button class="link" id="fill" aria-pressed="false" type="button">[ fill ]</button>
+          <button class="link" data-tool="move" type="button">[ move ]</button>
+        </div>
+        <div class="group" aria-label="size">
+          <span class="muted">size</span>
+          <button class="link" data-size="1" type="button">[ 1 ]</button>
+          <button class="link" data-size="2" type="button">[ 2 ]</button>
+          <button class="link" data-size="4" type="button">[ 4 ]</button>
+          <button class="link" data-size="8" type="button">[ 8 ]</button>
         </div>
         <div class="group">
           <span id="status" class="status" aria-live="polite">loading…</span>
@@ -55,7 +71,8 @@
 
     <section id="about">
       <h2>about</h2>
-      <p>Click a square to paint it. Scroll or pinch to zoom, and drag to pan. Keys 1, 2 and 3 pick a colour.</p>
+      <p>Drag to paint. Box and circle draw from corner to corner, and fill makes them solid. Scroll or pinch to zoom. Pan with move, two fingers, or by holding space.</p>
+      <p>Keys: 1 2 3 colour, b brush, e eraser, l line, r box, o circle, f fill, m move, [ and ] size.</p>
       <p>The badge is a 960×672 e-paper screen that only shows white, black and red. It checks for changes every minute, and a redraw takes a while.</p>
     </section>
   </main>

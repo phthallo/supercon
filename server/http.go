@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image/png"
 	"io"
 	"io/fs"
@@ -200,15 +201,25 @@ func (s *Server) handlePixel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		X, Y int
-		C    uint8
+		P [][2]int
+		C uint8
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	if body.X < 0 || body.X >= GridW || body.Y < 0 || body.Y >= GridH || body.C > Red {
-		jsonError(w, http.StatusBadRequest, "pixel out of range")
+	if len(body.P) == 0 || len(body.P) > MaxPaintCells {
+		jsonError(w, http.StatusBadRequest, fmt.Sprintf("send 1 to %d squares at a time", MaxPaintCells))
+		return
+	}
+	for _, p := range body.P {
+		if p[0] < 0 || p[0] >= GridW || p[1] < 0 || p[1] >= GridH {
+			jsonError(w, http.StatusBadRequest, "pixel out of range")
+			return
+		}
+	}
+	if body.C > Red {
+		jsonError(w, http.StatusBadRequest, "bad colour")
 		return
 	}
 	id, ip := s.cookie(w, r), s.clientIP(r)
@@ -218,13 +229,16 @@ func (s *Server) handlePixel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "cooling down", "retry_after": seconds(wait)})
 		return
 	}
-	if err := s.store.Paint(body.X, body.Y, body.C, ip, id); err != nil {
+	changed, err := s.store.Paint(body.P, body.C, ip, id)
+	if err != nil {
 		s.limiter.Refund(ip, id)
 		log.Printf("paint: %v", err)
 		jsonError(w, http.StatusInternalServerError, "Failed to save. Try again in a moment.")
 		return
 	}
-	s.hub.Publish(Event{T: "px", X: body.X, Y: body.Y, C: body.C})
+	if len(changed) > 0 {
+		s.hub.Publish(Event{T: "px", P: changed, C: body.C})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"retry_after": seconds(wait)})
 }
 

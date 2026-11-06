@@ -11,11 +11,10 @@ import (
 )
 
 type Event struct {
-	T string `json:"t"` // "px" or "widgets"
-	X int    `json:"x,omitempty"`
-	Y int    `json:"y,omitempty"`
-	C uint8  `json:"c"`
-	V string `json:"v,omitempty"`
+	T string   `json:"t"` // "px", "widgets" or "clear"
+	P [][2]int `json:"p,omitempty"`
+	C uint8    `json:"c"`
+	V string   `json:"v,omitempty"`
 }
 
 // Hub fans events out to connected browsers. A client that falls behind is dropped

@@ -158,30 +158,47 @@ func (s *Store) Canvas() []byte {
 	return append([]byte(nil), s.canvas...)
 }
 
-func (s *Store) Paint(x, y int, c uint8, ip, cookie string) error {
+// Paint sets every cell in cells to c in one transaction and returns the cells that changed.
+// Cells must be in range.
+func (s *Store) Paint(cells [][2]int, c uint8, ip, cookie string) ([][2]int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	i := y*GridW + x
-	prev := s.canvas[i]
-	s.canvas[i] = c
+	next := append([]byte(nil), s.canvas...)
+	changed := make([][2]int, 0, len(cells))
+	for _, p := range cells {
+		if i := p[1]*GridW + p[0]; next[i] != c {
+			next[i] = c
+			changed = append(changed, p)
+		}
+	}
+	if len(changed) == 0 {
+		return changed, nil
+	}
 	tx, err := s.db.Begin()
-	if err == nil {
-		_, err = tx.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, s.canvas)
-		if err == nil {
-			_, err = tx.Exec(`INSERT INTO paint_log (x, y, c, ip, cookie, ts) VALUES (?, ?, ?, ?, ?, ?)`, x, y, c, ip, cookie, time.Now().Unix())
-		}
-		if err == nil {
-			err = tx.Commit()
-		} else {
-			tx.Rollback()
-		}
-	}
 	if err != nil {
-		s.canvas[i] = prev
-		return err
+		return nil, err
 	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, next); err != nil {
+		return nil, err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO paint_log (x, y, c, ip, cookie, ts) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+	now := time.Now().Unix()
+	for _, p := range changed {
+		if _, err := stmt.Exec(p[0], p[1], c, ip, cookie, now); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	s.canvas = next
 	s.version++
-	return nil
+	return changed, nil
 }
 
 func (s *Store) ClearCanvas() error {

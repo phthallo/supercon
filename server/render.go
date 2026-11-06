@@ -28,6 +28,8 @@ const (
 	Cell   = 8
 	PanelW = GridW * Cell
 	PanelH = GridH * Cell
+	// Largest stroke or shape one paint request may set.
+	MaxPaintCells = 2500
 	// One bit per pixel, MONO_HLSB, matching EPaperDisplay._framebuffer_* in firmware/lib/epd.py.
 	PlaneSize = PanelW * PanelH / 8
 )
