@@ -31,6 +31,7 @@
       <div class="stage-wrap" id="viewport">
         <div class="stage" id="stage">
           <img id="preview" alt="badge preview" src="/badge/frame.png">
+          <canvas id="highlight" class="highlight" width="240" height="168" aria-hidden="true"></canvas>
         </div>
       </div>
     </div>
@@ -74,6 +75,17 @@
       </form>
     </aside>
   </main>
+
+  <section aria-labelledby="painters-title">
+    <h2 id="painters-title">painters</h2>
+    <p class="error" id="painters-error" aria-live="polite"></p>
+    <div class="table-scroll">
+      <table class="env painters">
+        <thead><tr><th>ip</th><th>showing</th><th>painted</th><th>browsers</th><th>last paint</th><th></th></tr></thead>
+        <tbody id="painters"><tr><td colspan="6" class="muted">loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
 
   <footer><a href="/">[ canvas ]</a></footer>
 </div>

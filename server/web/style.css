@@ -223,3 +223,13 @@ table.env td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: 
 table.env td:first-child { white-space: nowrap; }
 @media (max-width: 560px) { table.env td:first-child { white-space: normal; word-break: break-all; } }
 button.link:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.stage canvas.highlight { pointer-events: none; opacity: 0.75; }
+.table-scroll { overflow-x: auto; }
+table.painters { width: 100%; }
+table.painters th { text-align: left; font-weight: normal; color: var(--muted); padding: 6px 8px; border: 1px solid var(--line); }
+table.painters td:nth-child(n+2):nth-child(-n+4) { text-align: right; }
+table.painters td.actions { white-space: nowrap; }
+table.painters td.actions button + button { margin-left: 12px; }
+#painters-error:empty { display: none; }
+table.painters tr.shown td { background: var(--surface); }

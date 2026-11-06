@@ -77,6 +77,9 @@ type Store struct {
 	version int64
 	// Bumped only by widget edits; keys the web widget layer.
 	widgetVersion int64
+	// Last paint_log id before the most recent canvas clear.
+	clearedAfter int64
+	bans         map[string]bool
 
 	frameMu      sync.Mutex
 	frameVersion int64
@@ -136,6 +139,33 @@ CREATE TABLE IF NOT EXISTS widgets (
 	}
 	if len(s.canvas) != GridW*GridH {
 		return nil, fmt.Errorf("canvas blob is %d bytes, want %d", len(s.canvas), GridW*GridH)
+	}
+	if err := migrateLog(db); err != nil {
+		return nil, fmt.Errorf("migrate paint_log: %w", err)
+	}
+	if _, err := db.Exec(`
+CREATE INDEX IF NOT EXISTS paint_log_ip ON paint_log (ip);
+CREATE TABLE IF NOT EXISTS bans (ip TEXT PRIMARY KEY, ts INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);`); err != nil {
+		return nil, err
+	}
+	if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'cleared_after'`).Scan(&s.clearedAfter); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	s.bans = map[string]bool{}
+	bans, err := db.Query(`SELECT ip FROM bans`)
+	if err != nil {
+		return nil, err
+	}
+	for bans.Next() {
+		var ip string
+		if err := bans.Scan(&ip); err != nil {
+			return nil, err
+		}
+		s.bans[ip] = true
+	}
+	if err := bans.Close(); err != nil {
+		return nil, err
 	}
 	rows, err := db.Query(`SELECT id, kind, x, y, w, h, z, color, fill, border, text, font_size, font, align, grey, image_src FROM widgets`)
 	if err != nil {
@@ -217,10 +247,26 @@ func (s *Store) ClearCanvas() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	blank := make([]byte, GridW*GridH)
-	if _, err := s.db.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, blank); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
 		return err
 	}
-	s.canvas = blank
+	defer tx.Rollback()
+	var last int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM paint_log`).Scan(&last); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, blank); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO meta (key, value) VALUES ('cleared_after', ?)
+		ON CONFLICT (key) DO UPDATE SET value = excluded.value`, last); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.canvas, s.clearedAfter = blank, last
 	s.version++
 	return nil
 }

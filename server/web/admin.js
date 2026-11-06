@@ -173,6 +173,91 @@
 
   stage.addEventListener("pointerdown", (e) => { if (e.target === preview) select(null); });
 
+  // ---- painters ------------------------------------------------------------
+  const paintersEl = document.getElementById("painters");
+  const paintersError = document.getElementById("painters-error");
+  const highlight = document.getElementById("highlight");
+  let shown = null;
+
+  function ago(ts) {
+    if (!ts) return "–";
+    const s = Math.max(0, Date.now() / 1000 - ts);
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+  }
+
+  async function drawHighlight() {
+    const ctx = highlight.getContext("2d");
+    ctx.clearRect(0, 0, highlight.width, highlight.height);
+    if (!shown) return;
+    const { cells } = await api("GET", "/api/admin/painters/cells?ip=" + encodeURIComponent(shown));
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent");
+    for (const [x, y] of cells) ctx.fillRect(x, y, 1, 1);
+  }
+
+  function action(label, onClick) {
+    const b = document.createElement("button");
+    b.className = "link"; b.type = "button"; b.textContent = `[ ${label} ]`;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  async function moderate(path, body) {
+    try { await api("POST", path, body); paintersError.textContent = ""; } catch (err) { paintersError.textContent = err.message; }
+    loadPainters();
+  }
+
+  async function loadPainters() {
+    let data;
+    try { data = await api("GET", "/api/admin/painters"); } catch (err) { paintersError.textContent = err.message; return; }
+    paintersEl.replaceChildren();
+    if (!data.painters.length) {
+      paintersEl.innerHTML = `<tr><td colspan="6" class="muted">Nobody has painted yet.</td></tr>`;
+    }
+    for (const p of data.painters) {
+      const tr = document.createElement("tr");
+      if (p.ip === shown) tr.className = "shown";
+      const ip = document.createElement("td");
+      ip.textContent = p.ip + (p.ip === data.you ? " (you)" : "") + (p.blocked ? " · blocked" : "");
+      tr.append(ip);
+      for (const v of [p.showing, p.painted, p.browsers, ago(p.last)]) {
+        const td = document.createElement("td");
+        td.textContent = v;
+        tr.append(td);
+      }
+      const acts = document.createElement("td");
+      acts.className = "actions";
+      if (p.showing || p.ip === shown) acts.append(action(p.ip === shown ? "hide" : "show", () => {
+        shown = shown === p.ip ? null : p.ip;
+        loadPainters();
+      }));
+      if (p.showing) acts.append(action("remove pixels", () => {
+        if (confirm(`Are you sure you want to remove the ${p.showing} pixels from ${p.ip}? Each one goes back to what was there before, and their paint history is deleted. This can't be undone.`))
+          moderate("/api/admin/painters/remove", { ip: p.ip });
+      }));
+      acts.append(action(p.blocked ? "unblock" : "block", () => {
+        if (!p.blocked) {
+          let msg = `Block ${p.ip} from the site?`;
+          if (p.ip === data.you) msg += " This is your own IP.";
+          if (p.browsers > 1) msg += ` ${p.browsers} browsers have painted from this IP, so it may be shared wifi. All of them will lose access.`;
+          if (!confirm(msg)) return;
+        }
+        moderate("/api/admin/painters/block", { ip: p.ip, blocked: !p.blocked });
+      }));
+      tr.append(acts);
+      paintersEl.append(tr);
+    }
+    drawHighlight().catch((err) => { paintersError.textContent = err.message; });
+  }
+
+  let paintersTimer = null;
+  function refreshPainters() {
+    clearTimeout(paintersTimer);
+    paintersTimer = setTimeout(loadPainters, 2000);
+  }
+
   // ---- live ----------------------------------------------------------------
   async function load() {
     const data = await api("GET", "/api/widgets");
@@ -185,11 +270,13 @@
     ws.onmessage = (m) => {
       const e = JSON.parse(m.data);
       if (e.t === "widgets") load();
+      else refreshPainters();
       refreshPreview();
     };
     ws.onclose = () => setTimeout(connect, 3000);
   }
 
   load().catch((err) => showError(err.message));
+  loadPainters();
   connect();
 })();

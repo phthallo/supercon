@@ -69,12 +69,33 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("DELETE /api/admin/widgets/{id}", s.admin(s.handleDeleteWidget))
 	mux.HandleFunc("POST /api/admin/widgets/{id}/image", s.admin(s.handleWidgetImage))
 	mux.HandleFunc("POST /api/admin/canvas/clear", s.admin(s.handleClearCanvas))
+	mux.HandleFunc("GET /api/admin/painters", s.admin(s.handlePainters))
+	mux.HandleFunc("GET /api/admin/painters/cells", s.admin(s.handlePainterCells))
+	mux.HandleFunc("POST /api/admin/painters/remove", s.admin(s.handleRemovePainter))
+	mux.HandleFunc("POST /api/admin/painters/block", s.admin(s.handleBlockPainter))
 
 	mux.HandleFunc("GET /badge/frame", s.handleFrame)
 	mux.HandleFunc("GET /badge/frame.png", s.handleFramePNG)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
 
-	return sameOrigin(mux)
+	return sameOrigin(s.blockBanned(mux))
+}
+
+// blockBanned refuses banned IPs everywhere except admin (and the static files
+// it loads) and the badge, which may share an IP with the person being blocked.
+func (s *Server) blockBanned(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		open := p == "/admin" || p == "/healthz"
+		for _, prefix := range []string{"/api/admin/", "/badge/", "/static/"} {
+			open = open || strings.HasPrefix(p, prefix)
+		}
+		if !open && s.store.Blocked(s.clientIP(r)) {
+			http.Error(w, "blocked", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // sameOrigin blocks cross-site writes. Admin uses basic auth, which browsers attach
@@ -359,6 +380,71 @@ func (s *Server) handleClearCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.Publish(Event{T: "clear"})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handlePainters(w http.ResponseWriter, r *http.Request) {
+	painters, err := s.store.Painters()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"painters": painters, "you": s.clientIP(r)})
+}
+
+func (s *Server) handlePainterCells(w http.ResponseWriter, r *http.Request) {
+	cells, err := s.store.PainterCells(r.URL.Query().Get("ip"))
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cells": cells})
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(v); err != nil {
+		jsonError(w, http.StatusBadRequest, "bad json")
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleRemovePainter(w http.ResponseWriter, r *http.Request) {
+	var body struct{ IP string }
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.IP == "" {
+		jsonError(w, http.StatusBadRequest, "missing ip")
+		return
+	}
+	changed, err := s.store.RemovePainter(body.IP)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for c, cells := range changed {
+		s.hub.Publish(Event{T: "px", P: cells, C: c})
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleBlockPainter(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IP      string
+		Blocked bool
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.IP == "" {
+		jsonError(w, http.StatusBadRequest, "missing ip")
+		return
+	}
+	if err := s.store.SetBlocked(body.IP, body.Blocked); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
