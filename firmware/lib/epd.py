@@ -90,17 +90,41 @@ _SAME = bytes(range(256))
 
 
 # Viper functions are kept to four arguments, the limit on some MicroPython versions.
+# Large transfers go out in pieces this size. Pin IRQ callbacks are scheduled, not hard, so they
+# only run between Python calls: one 40 KB write would hold a button timestamp back 20 ms.
+_CHUNK = const(2400)
+_SPLIT_ROWS = const(56)
+_split_table = bytearray(256)
+
+
 @micropython.viper
-def _split(src: ptr8, left: ptr8, right: ptr8, table: ptr8):
-    """Split a full-width plane into the two COG halves, mapping each byte through table."""
+def _split_band(src: ptr8, left: ptr8, right: ptr8, rows: int):
+    """Split rows of a full-width plane into the two COG halves, mapping each byte through _split_table."""
+    table = ptr8(_split_table)
     i = 0
     o = 0
-    for _ in range(display_height):
+    for _ in range(rows):
         for c in range(display_half_width_bytes):
             left[o + c] = table[src[i + c]]
             right[o + c] = table[src[i + display_half_width_bytes + c]]
         i += display_width_bytes
         o += display_half_width_bytes
+
+
+def _split_bands(src, left, right):
+    """Slices for _split_band, made once: each memoryview slice is a heap allocation."""
+    src, left, right = memoryview(src), memoryview(left), memoryview(right)
+    bands = []
+    for row in range(0, display_height, _SPLIT_ROWS):
+        i = row * display_width_bytes
+        o = row * display_half_width_bytes
+        bands.append((src[i:], left[o:], right[o:], min(_SPLIT_ROWS, display_height - row)))
+    return bands
+
+
+def _chunks(buf):
+    mv = memoryview(buf)
+    return [mv[i : i + _CHUNK] for i in range(0, len(mv), _CHUNK)]
 
 
 @micropython.viper
@@ -175,10 +199,14 @@ class EPaperDisplay:
         # The black plane on the film, as last sent; valid only while _film_ok.
         self._film = (bytearray(half_frame_one_color_size), bytearray(half_frame_one_color_size))
         self._film_ok = False
+        # id(plane) -> its _CHUNK-sized slices, for the planes run() sends.
+        self._plane_chunks = {}
         self._delta_frames = 0
         # A delta session is open: COG initialised and booster running, so a frame is planes + 0x15.
         self._hot = False
         self._session_frames = 0
+        # Reopening a session delays that frame by ~430 ms. Apps that need a steady frame rate raise this.
+        self.session_max_frames = _SESSION_MAX_FRAMES
         self._last_frame = 0
         # A delta refresh is still running on the panel.
         self._inflight = False
@@ -271,17 +299,23 @@ class EPaperDisplay:
     async def run(self):
         # black_left, red_left, black_right, red_right
         halves = tuple(bytearray(half_frame_one_color_size) for _ in range(4))
-        table = _REVERSED if self._reverse_fb_bits else _SAME
+        _split_table[:] = _REVERSED if self._reverse_fb_bits else _SAME
+        black_left, red_left, black_right, red_right = halves
+        bands = _split_bands(self._framebuffer_black, black_left, black_right)
+        bands += _split_bands(self._framebuffer_red, red_left, red_right)
+        for h in halves + self._film:
+            self._plane_chunks[id(h)] = _chunks(h)
         while True:
             if self._framebuffer_ready.is_set():
                 self._display_updated.clear()
                 # Cleared before the copy, so an update() during the refresh queues another one.
                 self._framebuffer_ready.clear()
-                black_left, red_left, black_right, red_right = halves
-                _split(self._framebuffer_black, black_left, black_right, table)
-                _split(self._framebuffer_red, red_left, red_right, table)
-                await self.global_update(black_left, red_left, black_right, red_right)
-                gc.collect()
+                for band in bands:
+                    _split_band(*band)
+                delta = await self.global_update(black_left, red_left, black_right, red_right)
+                # A collection takes ~140 ms with nothing else running, so frame-rate apps skip it.
+                if not delta:
+                    gc.collect()
                 self._display_updated.set()
             elif self._hot and time.ticks_diff(time.ticks_ms(), self._last_frame) > _SESSION_IDLE_MS:
                 await self._close_session()
@@ -319,6 +353,17 @@ class EPaperDisplay:
                 "epd: full sent in", time.ticks_diff(sent, start),
                 "ms, refreshed in", time.ticks_diff(time.ticks_ms(), sent), "ms",
             )
+        return delta
+
+    def delta_frames_left(self) -> int:
+        """Delta frames before one goes through the full ~6 s waveform. 0 if the next one will."""
+        if not (self._driver_b and self._film_ok and not self._screen_red):
+            return 0
+        return max(0, _CLEAN_EVERY - self._delta_frames)
+
+    def request_clean(self):
+        """Send the next frame through the full waveform, so a run of delta frames can start fresh."""
+        self._film_ok = False
 
     async def _full_update(self, black_left, red_left, black_right, red_right, has_red: bool):
         await self._close_session()
@@ -344,7 +389,7 @@ class EPaperDisplay:
         runs it. Caller must have awaited _finish(): planes sent while the panel is busy are dropped.
         """
         film_left, film_right = self._film
-        if self._session_frames >= _SESSION_MAX_FRAMES:
+        if self._session_frames >= self.session_max_frames:
             await self._close_session()
         if self._hot:
             self._send_images(black_left, film_left, black_right, film_right)
@@ -478,8 +523,16 @@ class EPaperDisplay:
         EPD_CS1_PIN.value(True)
         EPD_DC_PIN.value(True)
         EPD_CS1_PIN.value(False)
-        self.spi.write(_wire(data))
+        self._write_chunked(data)
         EPD_CS1_PIN.value(True)
+
+    def _write_chunked(self, data):
+        chunks = self._plane_chunks.get(id(data))
+        if chunks is None:
+            self.spi.write(_wire(data))
+            return
+        for chunk in chunks:
+            self.spi.write(chunk)
 
     def _send_index_data_right(self, index: int, data: bytes | list | memoryview[int]):
         EPD_DC_PIN.value(False)
@@ -489,7 +542,7 @@ class EPaperDisplay:
         EPD_CS2_PIN.value(True)
         EPD_DC_PIN.value(True)
         EPD_CS2_PIN.value(False)
-        self.spi.write(_wire(data))
+        self._write_chunked(data)
         EPD_CS2_PIN.value(True)
 
     async def _wait_ready(self, timeout_ms: int = 180_000):
