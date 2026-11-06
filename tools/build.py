@@ -77,10 +77,13 @@ def release(files, vfs):
     if "apps/ink.py" not in files:
         sys.exit("--release needs the ink overlay")
     RELEASE.mkdir(exist_ok=True)
-    base = bytearray(BACKUP.read_bytes()[:VFS_OFFSET])
-    base[NVS_OFFSET : NVS_OFFSET + NVS_SIZE] = b"\xff" * NVS_SIZE
-    # Erased flash reads 0xFF, so trailing 0xFF never needs writing.
-    (RELEASE / "base.bin").write_bytes(bytes(base).rstrip(b"\xff"))
+    if BACKUP.exists():
+        base = bytearray(BACKUP.read_bytes()[:VFS_OFFSET])
+        base[NVS_OFFSET : NVS_OFFSET + NVS_SIZE] = b"\xff" * NVS_SIZE
+        # Erased flash reads 0xFF, so trailing 0xFF never needs writing.
+        (RELEASE / "base.bin").write_bytes(bytes(base).rstrip(b"\xff"))
+    elif not (RELEASE / "base.bin").exists():
+        sys.exit(f"need {BACKUP.relative_to(ROOT)} or an existing {RELEASE.relative_to(ROOT)}/base.bin")
     (RELEASE / "vfs.bin").write_bytes(vfs.rstrip(b"\xff"))
     shutil.copy2(files["apps/ink.py"], RELEASE / "ink.py")
     manifest = {

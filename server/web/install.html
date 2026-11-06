@@ -59,6 +59,25 @@
       <h2>after installing</h2>
       <p>Press the menu buttons to pick <b>Ink</b>, then press A. The badge checks the canvas every minute.</p>
     </section>
+
+    <section id="self-host">
+      <h2>host your own</h2>
+      <p>Want a canvas for just your friends? Run your own copy of this site. Badges installed from your site show your canvas.</p>
+      <ol>
+        <li>Fork <a href="https://github.com/phthallo/supercon">phthallo/supercon</a>.</li>
+        <li>Deploy <code>server/</code> with its Dockerfile, on any host that runs containers (Coolify, Fly.io, a VPS). Mount a volume at <code>/data</code> for the database.</li>
+        <li>Serve it over https. The flasher and USB access only work on secure pages.</li>
+        <li>Set the environment variables below.</li>
+        <li>Open <code>/install</code> on your site and install as above.</li>
+      </ol>
+      <table class="env">
+        <tr><td><code>ADMIN_PASSWORD</code></td><td>password for <code>/admin</code>, where you add text and images. Admin is off without it.</td></tr>
+        <tr><td><code>PAINT_COOLDOWN</code></td><td>wait between paints, like <code>30s</code>. <code>0s</code> turns it off.</td></tr>
+        <tr><td><code>WIFI_SSID</code>, <code>WIFI_PASSWORD</code></td><td>a network to prefill on this page.</td></tr>
+        <tr><td><code>TRUSTED_PROXY_HEADER</code></td><td>header holding the visitor's IP behind a proxy. Defaults to <code>X-Forwarded-For</code> in the Docker image.</td></tr>
+      </table>
+      <p>To change the badge app or the full image, edit the repo and run <code>.venv/bin/python tools/build.py supercon ink --release</code>, then redeploy. The README covers setting up the tools.</p>
+    </section>
   </main>
 
   <footer><a href="/">[ canvas ]</a></footer>

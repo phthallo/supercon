@@ -38,6 +38,9 @@ type Server struct {
 	hub           *Hub
 	adminPassword string
 	ipHeader      string
+	// Prefilled on /install. Public: anyone can read it from the page.
+	wifiSSID     string
+	wifiPassword string
 }
 
 func (s *Server) Routes() http.Handler {
@@ -48,6 +51,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.page(web, "index.html"))
 	mux.HandleFunc("GET /admin", s.admin(s.page(web, "admin.html")))
 	mux.HandleFunc("GET /install", s.page(web, "install.html"))
+	mux.HandleFunc("GET /api/install", s.handleInstall)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", static))
 	firmware, _ := fs.Sub(firmwareFS, "firmware")
 	mux.Handle("GET /install/files/", http.StripPrefix("/install/files/", noCache(http.FileServerFS(firmware))))
@@ -162,6 +166,14 @@ func jsonError(w http.ResponseWriter, status int, msg string) {
 
 func seconds(d interface{ Seconds() float64 }) float64 {
 	return math.Ceil(d.Seconds()*10) / 10
+}
+
+func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
+	networks := []map[string]string{}
+	if s.wifiSSID != "" {
+		networks = append(networks, map[string]string{"ssid": s.wifiSSID, "password": s.wifiPassword})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"networks": networks})
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {

@@ -15,6 +15,7 @@ MicroPython filesystem for the Supercon e-paper badge (ESP32-S3), split out of `
 ## Build and flash
 
 ```sh
+python3 -m venv .venv && .venv/bin/pip install littlefs-python esptool mpremote mpy-cross
 .venv/bin/python tools/build.py custom                          # your apps only
 .venv/bin/python tools/build.py supercon custom                 # Supercon apps plus yours
 .venv/bin/python tools/build.py custom --flash /dev/ttyACM0     # build and write to the badge
@@ -34,9 +35,17 @@ Put a module in `overlays/<name>/apps/`. Every `BaseApp` subclass in it shows up
 
 ## Ink canvas
 
-A website where anyone paints a 120×84 grid in white, black and red, one pixel per cooldown. The admin places text, box and image widgets on top at `/admin`. The badge's Ink app downloads the combined 960×672 frame.
+A website where anyone paints a 120×84 grid in white, black and red. The admin places text, box and image widgets on top at `/admin`. The badge's Ink app downloads the combined 960×672 frame. Live at https://ink.underwhelm.ing.
 
-Badge:
+Other people install it from the site's `/install` page, which also explains hosting your own copy. It copies `apps/ink.py` onto a badge or flashes the whole image, then writes the wifi networks and the site's URL to the badge. `server/firmware/` holds those files:
+
+```sh
+.venv/bin/python tools/build.py supercon ink --release
+```
+
+The release keeps the committed `server/firmware/base.bin` (bootloader and MicroPython) when `extracted/supercon_backup.bin` isn't there.
+
+Your own badge:
 
 ```sh
 cp overlays/ink/data/wifi.example.json overlays/custom/data/wifi.json   # then fill in ssid and password
@@ -58,7 +67,8 @@ go test ./...
 | `ADDR` | `:8080` | |
 | `DB_PATH` | `ink.db` (`/data/ink.db` in Docker) | SQLite file: canvas, paint log, widgets |
 | `ADMIN_PASSWORD` | empty, which disables `/admin` | Basic auth password, any username |
-| `PAINT_COOLDOWN` | `30s` | Per IP and per cookie |
+| `PAINT_COOLDOWN` | `30s` | Per IP and per cookie. `0s` turns it off |
+| `WIFI_SSID`, `WIFI_PASSWORD` | empty | Network prefilled on `/install`. Anyone can read it from the page |
 | `TRUSTED_PROXY_HEADER` | empty (`X-Forwarded-For` in Docker) | Header the client IP comes from. Use `CF-Connecting-IP` behind Cloudflare |
 
 `GET /badge/frame` returns the black plane then the red plane (80,640 bytes each, MSB = leftmost pixel), zlib-compressed, with an ETag. `GET /badge/frame.png` returns the same frame as a PNG.

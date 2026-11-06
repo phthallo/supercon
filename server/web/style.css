@@ -199,4 +199,9 @@ footer { text-align: center; font-size: 14px; color: var(--muted); padding-top: 
 .panel .network label { grid-template-columns: auto 1fr; }
 .network button.link { justify-self: start; }
 @media (max-width: 560px) { .network { grid-template-columns: 1fr; } }
+code { color: var(--accent); }
+table.env { border-collapse: collapse; font-size: 14px; margin: 8px 0 16px; }
+table.env td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
+table.env td:first-child { white-space: nowrap; }
+@media (max-width: 560px) { table.env td:first-child { white-space: normal; word-break: break-all; } }
 button.link:disabled { opacity: 0.5; cursor: not-allowed; }

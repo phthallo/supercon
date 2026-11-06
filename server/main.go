@@ -39,6 +39,8 @@ func main() {
 		hub:           NewHub(),
 		adminPassword: admin,
 		ipHeader:      env("TRUSTED_PROXY_HEADER", ""),
+		wifiSSID:      os.Getenv("WIFI_SSID"),
+		wifiPassword:  os.Getenv("WIFI_PASSWORD"),
 	}
 	httpSrv := &http.Server{
 		Addr:              env("ADDR", ":8080"),

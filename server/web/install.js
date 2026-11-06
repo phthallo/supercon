@@ -29,7 +29,11 @@
     });
     list.append(row);
   }
-  addRow();
+  fetch("/api/install")
+    .then((r) => r.json())
+    .then((cfg) => cfg.networks.forEach((n) => addRow(n.ssid, n.password)))
+    .catch(() => {})
+    .finally(() => { if (!list.children.length) addRow(); });
   document.getElementById("add-network").addEventListener("click", () => addRow());
 
   function networks() {
