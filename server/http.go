@@ -239,8 +239,9 @@ func (s *Server) handlePixel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if body.C > Red {
-		jsonError(w, http.StatusBadRequest, "bad colour")
+	// Red needs a full panel refresh on the badge, so only widgets may use it.
+	if body.C > Black {
+		jsonError(w, http.StatusBadRequest, "paint in white or black")
 		return
 	}
 	id, ip := s.cookie(w, r), s.clientIP(r)
