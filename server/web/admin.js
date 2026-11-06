@@ -146,6 +146,17 @@
     render();
   }
 
+  function restack(front) {
+    const w = current();
+    const others = widgets.filter((x) => x.id !== w?.id).map((x) => x.z);
+    if (!w || !others.length) return;
+    const z = front ? Math.max(...others) + 1 : Math.min(...others) - 1;
+    if (front ? w.z >= z : w.z <= z) return;
+    save(w.id, { z }, { ...w });
+  }
+  document.getElementById("to-front").addEventListener("click", () => restack(true));
+  document.getElementById("to-back").addEventListener("click", () => restack(false));
+
   document.getElementById("delete").addEventListener("click", async () => {
     const w = current();
     if (!w || !confirm(`Are you sure you want to delete ${w.kind} #${w.id}?`)) return;
