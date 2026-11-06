@@ -18,8 +18,6 @@ import sys
 import time
 from pathlib import Path
 
-from littlefs import LittleFS
-
 ROOT = Path(__file__).resolve().parent.parent
 FIRMWARE = ROOT / "firmware"
 OVERLAYS = ROOT / "overlays"
@@ -56,6 +54,9 @@ def collect(overlays):
 
 
 def build_image(files):
+    # Imported here so tools/sim/badge-sim can use collect() without the venv.
+    from littlefs import LittleFS
+
     fs = LittleFS(block_size=BLOCK_SIZE, block_count=VFS_SIZE // BLOCK_SIZE)
     for rel, src in sorted(files.items()):
         parent = rel.rsplit("/", 1)[0] if "/" in rel else ""

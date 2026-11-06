@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Run the badge simulator on firmware/ plus overlays.
+
+    tools/sim/badge-sim supercon custom
+    tools/sim/badge-sim quadrant --real-refresh --scale 0.7
+
+Overlay names come first; everything after them goes to sim.py (see its docstring).
+The merged tree is copied to tools/sim/fs/ on every run, so edits show up on restart.
+Set LVGL_MICROPY to use an interpreter other than tools/sim/build/lvgl_micropy_unix.
+"""
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+SIM = Path(__file__).resolve().parent
+sys.path.insert(0, str(SIM.parent))
+from build import NON_APPS, collect  # noqa: E402
+
+args = sys.argv[1:]
+overlays = []
+while args and not args[0].startswith("-"):
+    overlays.append(args.pop(0))
+if not overlays:
+    sys.exit(__doc__)
+
+files = collect(overlays)
+if not [rel for rel in files if rel.startswith("apps/") and rel.count("/") == 1 and rel.split("/")[1] not in NON_APPS]:
+    sys.exit("no apps in the selected overlays; the app switcher divides by the app count and would crash")
+
+stage = SIM / "fs"
+shutil.rmtree(stage, ignore_errors=True)
+for rel, src in files.items():
+    dest = stage / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+# The firmware writes these at runtime.
+(stage / "data").mkdir(exist_ok=True)
+
+interpreter = os.environ.get("LVGL_MICROPY", str(SIM / "build" / "lvgl_micropy_unix"))
+# The window's frame buffers come from the heap (3 bytes per window pixel, two of them),
+# on top of the firmware's ~10 MB.
+os.execv(interpreter, [interpreter, "-X", "heapsize=160M", str(SIM / "sim.py"), *args])
