@@ -143,9 +143,6 @@ CREATE TABLE IF NOT EXISTS widgets (
 	if err := migrateLog(db); err != nil {
 		return nil, fmt.Errorf("migrate paint_log: %w", err)
 	}
-	if err := migrateNoRed(db, s.canvas); err != nil {
-		return nil, fmt.Errorf("migrate red to black: %w", err)
-	}
 	if _, err := db.Exec(`
 CREATE INDEX IF NOT EXISTS paint_log_ip ON paint_log (ip);
 CREATE TABLE IF NOT EXISTS bans (ip TEXT PRIMARY KEY, ts INTEGER NOT NULL);

@@ -45,33 +45,6 @@ func migrateLog(db *sql.DB) error {
 	return tx.Commit()
 }
 
-// migrateNoRed turns painted red into black once, after painting in red was removed.
-func migrateNoRed(db *sql.DB, canvas []byte) error {
-	var ver int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil || ver >= 2 {
-		return err
-	}
-	for i, c := range canvas {
-		if c == Red {
-			canvas[i] = Black
-		}
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, q := range []string{`UPDATE paint_log SET c = 1 WHERE c = 2`, `PRAGMA user_version = 2`} {
-		if _, err := tx.Exec(q); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, canvas); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 type Painter struct {
 	IP       string `json:"ip"`
 	Showing  int    `json:"showing"`

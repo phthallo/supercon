@@ -375,7 +375,7 @@
   const KEYS = { b: "brush", e: "eraser", o: "circle", t: "text", m: "move" };
   window.addEventListener("keydown", (e) => {
     if (e.target.closest("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key === "1" || e.key === "2") pickColor(Number(e.key) - 1);
+    if (e.key >= "1" && e.key <= "3") pickColor(Number(e.key) - 1);
     else if (KEYS[e.key]) { e.preventDefault(); pickTool(KEYS[e.key]); }
     else if (e.key === "[" || e.key === "]") {
       const i = SIZES.indexOf(size) + (e.key === "]" ? 1 : -1);
