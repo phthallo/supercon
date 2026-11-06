@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ink admin</title>
+  <script>try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="primary">
+  <header>
+    <div class="navbox">
+      <div class="row">
+        <span class="crumbs">/ <a href="/">home</a> / <a href="/">ink</a> / <a href="/admin">admin</a></span>
+        <button class="link" id="theme" type="button">[ light ]</button>
+      </div>
+      <hr>
+      <nav>
+        <button class="link" data-add="text" type="button">[ + text ]</button>
+        <button class="link" data-add="box" type="button">[ + box ]</button>
+        <button class="link" data-add="image" type="button">[ + image ]</button>
+        <button class="link" id="clear-canvas" type="button">[ clear canvas ]</button>
+      </nav>
+    </div>
+    <h1>widgets.</h1>
+  </header>
+
+  <main class="admin-grid">
+    <div>
+      <div class="stage-wrap" id="viewport">
+        <div class="stage" id="stage">
+          <img id="preview" alt="badge preview" src="/badge/frame.png">
+        </div>
+      </div>
+    </div>
+
+    <aside class="panel" id="panel">
+      <p class="muted" id="empty">Select a widget to edit it.</p>
+      <form id="form" hidden>
+        <h2 id="form-title">widget</h2>
+        <label data-for="text">text <textarea name="text"></textarea></label>
+        <div class="row2">
+          <label>x <input name="x" type="number"></label>
+          <label>y <input name="y" type="number"></label>
+          <label>w <input name="w" type="number" min="1" max="960"></label>
+          <label>h <input name="h" type="number" min="1" max="672"></label>
+          <label>z <input name="z" type="number"></label>
+          <label>border <input name="border" type="number" min="0" max="64"></label>
+        </div>
+        <label>colour
+          <select name="color"><option value="0">white</option><option value="1">black</option><option value="2">red</option></select>
+        </label>
+        <label data-for="text box">fill
+          <select name="fill"><option value="-1">none</option><option value="0">white</option><option value="1">black</option><option value="2">red</option></select>
+        </label>
+        <label data-for="text">font
+          <select name="font">
+            <option value="mono">mono</option><option value="mono-bold">mono bold</option>
+            <option value="sans">sans</option><option value="sans-bold">sans bold</option>
+            <option value="italic">italic</option><option value="smallcaps">small caps</option>
+          </select>
+        </label>
+        <label data-for="text">size <input name="font_size" type="number" min="8" max="300"></label>
+        <label data-for="text">align
+          <select name="align"><option value="left">left</option><option value="center">center</option></select>
+        </label>
+        <label data-for="image">image <input name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp"></label>
+        <label data-for="image">greyscale <input name="grey" type="checkbox"></label>
+        <p class="error" id="error" aria-live="polite"></p>
+        <div class="actions">
+          <button class="link" id="delete" type="button">[ delete ]</button>
+        </div>
+      </form>
+    </aside>
+  </main>
+
+  <footer><a href="/">[ canvas ]</a></footer>
+</div>
+<script src="/static/theme.js"></script>
+<script src="/static/admin.js"></script>
+</body>
+</html>

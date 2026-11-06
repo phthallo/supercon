@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ink</title>
+  <meta name="description" content="a shared pixel canvas that shows up on an e-paper badge">
+  <script>try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="primary">
+  <header>
+    <div class="navbox">
+      <div class="row">
+        <span class="crumbs">/ <a href="/">home</a> / <a href="/">ink</a></span>
+        <span><span id="online" class="muted"></span> <button class="link" id="theme" type="button">[ light ]</button></span>
+      </div>
+      <hr>
+      <nav>
+        <a href="#about">[ about ]</a>
+        <a href="/badge/frame.png" target="_blank">[ badge view ]</a>
+        <a href="/install">[ put it on your badge ]</a>
+      </nav>
+    </div>
+    <h1>ink.</h1>
+  </header>
+
+  <main>
+    <p>Paint here and it shows up on Supercon badges! You get <b>one pixel every <span id="cooldown">30</span>s</b> :]</p>
+
+    <section id="paint" aria-label="canvas">
+      <div class="stage-wrap" id="viewport">
+        <div class="stage" id="stage">
+          <canvas id="canvas" width="960" height="672"></canvas>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="group" role="radiogroup" aria-label="colour">
+          <button class="link swatch" style="--sw:#fff" data-c="0" aria-pressed="false" type="button">[ white ]</button>
+          <button class="link swatch" style="--sw:#000" data-c="1" aria-pressed="true" type="button">[ black ]</button>
+          <button class="link swatch" style="--sw:#f00" data-c="2" aria-pressed="false" type="button">[ red ]</button>
+        </div>
+        <div class="group">
+          <span id="status" class="status" aria-live="polite">loading…</span>
+          <span id="coords" class="muted">x – y –</span>
+        </div>
+        <div class="group">
+          <button class="link" id="zoom-in" type="button" aria-label="zoom in">[ + ]</button>
+          <button class="link" id="zoom-out" type="button" aria-label="zoom out">[ − ]</button>
+          <button class="link" id="zoom-reset" type="button">[ fit ]</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="about">
+      <h2>about</h2>
+      <p>Click a square to paint it. Scroll or pinch to zoom, and drag to pan. Keys 1, 2 and 3 pick a colour.</p>
+      <p>The badge is a 960×672 e-paper screen that only shows white, black and red. It checks for changes every minute, and a redraw takes a while.</p>
+    </section>
+  </main>
+
+  <footer><a href="https://phthallo.com">phthallo</a></footer>
+</div>
+<script src="/static/theme.js"></script>
+<script src="/static/paint.js"></script>
+</body>
+</html>

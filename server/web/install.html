@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ink install</title>
+  <meta name="description" content="put the shared ink canvas on your Supercon badge">
+  <script>try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+</head>
+<body>
+<div id="primary">
+  <header>
+    <div class="navbox">
+      <div class="row">
+        <span class="crumbs">/ <a href="/">home</a> / <a href="/">ink</a> / <a href="/install">install</a></span>
+        <button class="link" id="theme" type="button">[ light ]</button>
+      </div>
+    </div>
+    <h1>install.</h1>
+  </header>
+
+  <main>
+    <p>Put the canvas on your own Supercon badge! You need Chrome or Edge on a computer and a USB-C cable.</p>
+    <p class="error" id="unsupported" hidden>This browser can't talk to USB devices. Open this page in Chrome or Edge on a computer.</p>
+
+    <section class="panel">
+      <h2>wifi</h2>
+      <p class="muted">Saved on your badge only. It joins whichever network is in range. Networks with a sign-in page won't work, but a phone hotspot will.</p>
+      <div id="networks"></div>
+      <button class="link" id="add-network" type="button">[ + network ]</button>
+    </section>
+
+    <div class="install-grid">
+      <section class="panel">
+        <h2>add ink</h2>
+        <p>Keeps everything on your badge. Redraws take about 40s.</p>
+        <button class="link" id="add-ink" type="button">[ add to my badge ]</button>
+      </section>
+
+      <section class="panel">
+        <h2>full image</h2>
+        <p>Erases your badge and installs the stock apps plus ink, with faster redraws (about 5s).</p>
+        <ol>
+          <li><esp-web-install-button manifest="/install/files/manifest.json">
+            <button class="link" slot="activate" type="button">[ flash ]</button>
+            <span slot="unsupported" class="muted">needs Chrome or Edge</span>
+            <span slot="not-allowed" class="muted">needs https</span>
+          </esp-web-install-button></li>
+          <li><button class="link" id="save-wifi" type="button">[ save wifi ]</button></li>
+        </ol>
+      </section>
+    </div>
+
+    <p class="status" id="status" aria-live="polite"></p>
+
+    <section>
+      <h2>after installing</h2>
+      <p>Press the menu buttons to pick <b>Ink</b>, then press A. The badge checks the canvas every minute.</p>
+    </section>
+  </main>
+
+  <footer><a href="/">[ canvas ]</a></footer>
+</div>
+<script src="/static/theme.js"></script>
+<script src="/static/repl.js"></script>
+<script src="/static/install.js"></script>
+</body>
+</html>

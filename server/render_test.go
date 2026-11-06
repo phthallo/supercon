@@ -1,0 +1,145 @@
+package main
+
+import (
+	"bytes"
+	"compress/zlib"
+	"image"
+	"image/color"
+	"io"
+	"testing"
+)
+
+func unpack(t *testing.T, frame []byte) []byte {
+	t.Helper()
+	zr, err := zlib.NewReader(bytes.NewReader(frame))
+	if err != nil {
+		t.Fatal(err)
+	}
+	planes, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planes) != 2*PlaneSize {
+		t.Fatalf("planes are %d bytes, want %d", len(planes), 2*PlaneSize)
+	}
+	return planes
+}
+
+func TestPackFrameBitOrder(t *testing.T) {
+	canvas := make([]byte, GridW*GridH)
+	canvas[0] = Black       // panel pixels x 0-7, y 0-7
+	canvas[1*GridW+2] = Red // x 16-23, y 8-15
+	planes := unpack(t, PackFrame(Render(canvas, nil)))
+	black, red := planes[:PlaneSize], planes[PlaneSize:]
+
+	rowBytes := PanelW / 8
+	if black[0] != 0xff || black[1] != 0 || red[0] != 0 {
+		t.Fatalf("cell 0: black[0]=%#x black[1]=%#x red[0]=%#x", black[0], black[1], red[0])
+	}
+	if black[8*rowBytes] != 0 {
+		t.Fatalf("cell 0 leaked into row 8")
+	}
+	if got := red[8*rowBytes+2]; got != 0xff {
+		t.Fatalf("red cell: byte = %#x, want 0xff", got)
+	}
+	if got := black[8*rowBytes+2]; got != 0 {
+		t.Fatalf("red cell also set black: %#x", got)
+	}
+}
+
+func TestPackFrameSinglePixelMSBFirst(t *testing.T) {
+	img := Render(make([]byte, GridW*GridH), nil)
+	img.Pix[3] = Black // x=3, y=0
+	planes := unpack(t, PackFrame(img))
+	if planes[0] != 0x10 {
+		t.Fatalf("x=3 packed to %#08b, want 0b00010000", planes[0])
+	}
+}
+
+func TestWidgetsDrawOverCanvas(t *testing.T) {
+	canvas := make([]byte, GridW*GridH)
+	for i := range canvas {
+		canvas[i] = Black
+	}
+	box := Widget{ID: 1, Kind: KindBox, X: 10, Y: 10, W: 20, H: 20, Fill: int(Red), Border: 2, Color: White}
+	img := Render(canvas, []Widget{box})
+	at := func(x, y int) uint8 { return img.Pix[y*img.Stride+x] }
+	if at(0, 0) != Black || at(10, 10) != White || at(20, 20) != Red || at(29, 29) != White || at(30, 30) != Black {
+		t.Fatalf("got %d %d %d %d %d", at(0, 0), at(10, 10), at(20, 20), at(29, 29), at(30, 30))
+	}
+}
+
+func TestWidgetZOrder(t *testing.T) {
+	low := Widget{ID: 1, Kind: KindBox, X: 0, Y: 0, W: 10, H: 10, Fill: int(Red), Z: 5}
+	high := Widget{ID: 2, Kind: KindBox, X: 0, Y: 0, W: 10, H: 10, Fill: int(Black), Z: 1}
+	img := Render(make([]byte, GridW*GridH), []Widget{low, high})
+	if img.Pix[0] != Red {
+		t.Fatalf("higher z should win, got %d", img.Pix[0])
+	}
+}
+
+func TestTextRendersInk(t *testing.T) {
+	w := NewWidget(KindText)
+	w.Text = "HELLO"
+	w.Color = Red
+	img := Render(nil, []Widget{w})
+	red := 0
+	for _, p := range img.Pix {
+		if p == Red {
+			red++
+		}
+	}
+	if red == 0 {
+		t.Fatal("no text pixels drawn")
+	}
+}
+
+func TestWidgetLayerIsTransparentOutsideWidgets(t *testing.T) {
+	img := Render(nil, []Widget{{Kind: KindBox, X: 0, Y: 0, W: 4, H: 4, Fill: int(Black)}})
+	if img.Pix[0] != Black || img.Pix[PanelW*PanelH-1] != Clear {
+		t.Fatal("layer background should be Clear")
+	}
+	planes := unpack(t, PackFrame(img))
+	if planes[PlaneSize-1] != 0 || planes[2*PlaneSize-1] != 0 {
+		t.Fatal("Clear must pack as white")
+	}
+}
+
+func TestDitherUsesOnlyInk(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for y := 0; y < 64; y++ {
+		for x := 0; x < 64; x++ {
+			src.Set(x, y, color.RGBA{uint8(x * 4), uint8(y * 4), 128, uint8(255 - x)})
+		}
+	}
+	out := Dither(src, 30, 20, false)
+	if len(out) != 600 {
+		t.Fatalf("len %d", len(out))
+	}
+	seen := map[byte]bool{}
+	for _, p := range out {
+		if p > Red {
+			t.Fatalf("index %d outside the panel palette", p)
+		}
+		seen[p] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("gradient dithered to a single colour: %v", seen)
+	}
+}
+
+func TestDitherGreyHasNoRed(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for y := 0; y < 64; y++ {
+		for x := 0; x < 64; x++ {
+			src.Set(x, y, color.RGBA{255, uint8(x * 4), uint8(y * 4), 255})
+		}
+	}
+	seen := map[byte]bool{}
+	for _, p := range Dither(src, 30, 20, true) {
+		seen[p] = true
+	}
+	if seen[Red] || !seen[White] || !seen[Black] {
+		t.Fatalf("want only white and black, got %v", seen)
+	}
+}
