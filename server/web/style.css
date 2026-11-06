@@ -123,7 +123,7 @@ p { margin: 8px 0 16px; }
 .toolbar .zoom { margin-left: auto; }
 .toolbar .statusbar { display: flex; justify-content: space-between; gap: 12px; padding: 6px 8px; border-top: 1px solid var(--line); }
 
-button.icon, button.chip {
+button.icon, .chip {
   display: inline-grid;
   place-items: center;
   width: 36px;
@@ -139,8 +139,10 @@ button.icon[aria-pressed="true"] { background: var(--accent); border-color: var(
 button.icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: square; stroke-linejoin: miter; }
 button.icon .dot { width: var(--d); height: var(--d); background: currentColor; }
 
-button.chip { background: var(--sw); border-color: var(--muted); }
-button.chip[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chip { background: var(--sw); border-color: var(--muted); image-rendering: pixelated; }
+.chip[aria-pressed="true"], .chip:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chip input[type="color"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.chip.custom { position: relative; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .text-input {
@@ -204,6 +206,10 @@ footer { text-align: center; font-size: 14px; color: var(--muted); padding-top: 
   min-width: 0;
 }
 .panel textarea { min-height: 5em; resize: vertical; }
+.panel input[type="color"] { height: 32px; padding: 2px; cursor: pointer; }
+.panel .fill-row { display: flex; gap: 8px; align-items: center; }
+.panel .fill-row input[type="checkbox"] { width: auto; }
+.panel .fill-row input[type="color"]:disabled { opacity: .3; cursor: default; }
 .panel .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .panel .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
 .error { color: var(--bold); min-height: 1.5em; }

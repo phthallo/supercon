@@ -45,9 +45,10 @@
             <button class="icon" data-tool="move" type="button" title="Move (M), or hold space" aria-label="move"><svg viewBox="0 0 24 24"><path d="M12 3v18 M3 12h18 M9 6l3-3 3 3 M9 18l3 3 3-3 M6 9l-3 3 3 3 M18 9l3 3-3 3"/></svg></button>
           </div>
           <div class="group" aria-label="colour">
-            <button class="chip swatch" style="--sw:#fff" data-c="0" type="button" title="White (1)" aria-label="white"></button>
-            <button class="chip swatch" style="--sw:#000" data-c="1" type="button" title="Black (2)" aria-label="black"></button>
-            <button class="chip swatch" style="--sw:#f00" data-c="2" type="button" title="Red (3)" aria-label="red"></button>
+            <button class="chip swatch" style="--sw:#fff" data-rgb="ffffff" type="button" title="White (1)" aria-label="white"></button>
+            <button class="chip swatch" style="--sw:#000" data-rgb="000000" type="button" title="Black (2)" aria-label="black"></button>
+            <button class="chip swatch" style="--sw:#f00" data-rgb="ff0000" type="button" title="Red (3)" aria-label="red"></button>
+            <label class="chip swatch custom" title="Any colour, dithered (4)"><input id="custom" type="color" value="#808080" aria-label="any colour"></label>
           </div>
           <div class="group" id="sizes" aria-label="size">
             <button class="icon" data-size="1" type="button" title="Size 1 ([ and ] to change)" aria-label="size 1"><span class="dot" style="--d:3px"></span></button>

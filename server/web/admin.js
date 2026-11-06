@@ -95,16 +95,21 @@
 
   // ---- form ----------------------------------------------------------------
   const current = () => widgets.find((w) => w.id === selected);
+  const hex = (rgb) => "#" + rgb.toString(16).padStart(6, "0");
+  const fromHex = (h) => parseInt(h.slice(1), 16);
 
   function fillForm() {
     const w = current();
     form.hidden = !w; empty.hidden = !!w;
     if (!w) return;
     document.getElementById("form-title").textContent = `${w.kind} #${w.id}`;
+    form.elements.has_fill.checked = w.fill >= 0;
+    form.elements.fill.disabled = w.fill < 0;
     for (const el of form.elements) {
       if (!el.name || el.type === "file" || el === document.activeElement) continue;
       if (!(el.name in w)) continue;
       if (el.type === "checkbox") el.checked = w[el.name];
+      else if (el.type === "color") { if (w[el.name] >= 0) el.value = hex(w[el.name]); }
       else el.value = w[el.name];
     }
     form.querySelectorAll("[data-for]").forEach((el) => {
@@ -128,7 +133,11 @@
       el.value = "";
       return;
     }
-    const value = el.type === "checkbox" ? el.checked : el.type === "number" || el.tagName === "SELECT" && el.name !== "align" && el.name !== "font" ? Number(el.value) : el.value;
+    if (el.name === "has_fill") {
+      await save(w.id, { fill: el.checked ? fromHex(form.elements.fill.value) : -1 }, { ...w });
+      return;
+    }
+    const value = el.type === "checkbox" ? el.checked : el.type === "color" ? fromHex(el.value) : el.type === "number" ? Number(el.value) : el.value;
     await save(w.id, { [el.name]: value }, { ...w });
   });
 

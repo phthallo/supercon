@@ -61,7 +61,7 @@ func TestWidgetsDrawOverCanvas(t *testing.T) {
 	for i := range canvas {
 		canvas[i] = Black
 	}
-	box := Widget{ID: 1, Kind: KindBox, X: 10, Y: 10, W: 20, H: 20, Fill: int(Red), Border: 2, Color: White}
+	box := Widget{ID: 1, Kind: KindBox, X: 10, Y: 10, W: 20, H: 20, Fill: RGBRed, Border: 2, Color: RGBWhite}
 	img := Render(canvas, []Widget{box})
 	at := func(x, y int) uint8 { return img.Pix[y*img.Stride+x] }
 	if at(0, 0) != Black || at(10, 10) != White || at(20, 20) != Red || at(29, 29) != White || at(30, 30) != Black {
@@ -70,8 +70,8 @@ func TestWidgetsDrawOverCanvas(t *testing.T) {
 }
 
 func TestWidgetZOrder(t *testing.T) {
-	low := Widget{ID: 1, Kind: KindBox, X: 0, Y: 0, W: 10, H: 10, Fill: int(Red), Z: 5}
-	high := Widget{ID: 2, Kind: KindBox, X: 0, Y: 0, W: 10, H: 10, Fill: int(Black), Z: 1}
+	low := Widget{ID: 1, Kind: KindBox, X: 0, Y: 0, W: 10, H: 10, Fill: RGBRed, Z: 5}
+	high := Widget{ID: 2, Kind: KindBox, X: 0, Y: 0, W: 10, H: 10, Fill: RGBBlack, Z: 1}
 	img := Render(make([]byte, GridW*GridH), []Widget{low, high})
 	if img.Pix[0] != Red {
 		t.Fatalf("higher z should win, got %d", img.Pix[0])
@@ -81,7 +81,7 @@ func TestWidgetZOrder(t *testing.T) {
 func TestTextRendersInk(t *testing.T) {
 	w := NewWidget(KindText)
 	w.Text = "HELLO"
-	w.Color = Red
+	w.Color = RGBRed
 	img := Render(nil, []Widget{w})
 	red := 0
 	for _, p := range img.Pix {
@@ -95,7 +95,7 @@ func TestTextRendersInk(t *testing.T) {
 }
 
 func TestWidgetLayerIsTransparentOutsideWidgets(t *testing.T) {
-	img := Render(nil, []Widget{{Kind: KindBox, X: 0, Y: 0, W: 4, H: 4, Fill: int(Black)}})
+	img := Render(nil, []Widget{{Kind: KindBox, X: 0, Y: 0, W: 4, H: 4, Fill: RGBBlack}})
 	if img.Pix[0] != Black || img.Pix[PanelW*PanelH-1] != Clear {
 		t.Fatal("layer background should be Clear")
 	}
@@ -125,6 +125,33 @@ func TestDitherUsesOnlyInk(t *testing.T) {
 	}
 	if len(seen) < 2 {
 		t.Fatalf("gradient dithered to a single colour: %v", seen)
+	}
+}
+
+func TestInkMixesColoursOverEachTile(t *testing.T) {
+	count := func(rgb int) [3]int {
+		var n [3]int
+		for y := 0; y < 4; y++ {
+			for x := 0; x < 4; x++ {
+				n[Ink(rgb, x, y)]++
+			}
+		}
+		return n
+	}
+	for _, tc := range []struct {
+		rgb  int
+		want [3]int // white, black, red out of 16
+	}{
+		{RGBWhite, [3]int{16, 0, 0}},
+		{RGBBlack, [3]int{0, 16, 0}},
+		{RGBRed, [3]int{0, 0, 16}},
+		{0x808080, [3]int{8, 8, 0}},
+		{0x800000, [3]int{0, 8, 8}},
+		{0x0000ff, [3]int{2, 14, 0}},
+	} {
+		if got := count(tc.rgb); got != tc.want {
+			t.Errorf("Ink(%06x) = %v, want %v", tc.rgb, got, tc.want)
+		}
 	}
 }
 

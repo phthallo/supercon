@@ -1,5 +1,16 @@
 (() => {
   const COLORS = [[255, 255, 255], [0, 0, 0], [255, 0, 0]];
+  const WHITE = 0xffffff, RED = 0xff0000;
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  // Same as Ink in render.go: the palette colour for rgb at cell (x, y).
+  function ink(rgb, x, y) {
+    const r = (rgb >> 16 & 255) / 255, g = (rgb >> 8 & 255) / 255, b = (rgb & 255) / 255;
+    const red = Math.max(0, r - Math.max(g, b));
+    const white = 0.299 * r + 0.587 * g + 0.114 * b - 0.299 * red;
+    const black = 1 - white - red;
+    const t = (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
+    return t < black ? 1 : t < black + red ? 2 : 0;
+  }
   const MAX_CELLS = 10000;
   const viewport = document.getElementById("viewport");
   const stage = document.getElementById("stage");
@@ -15,7 +26,7 @@
   let off = document.createElement("canvas");
   let offCtx, offImg;
   let layer = null;
-  let color = 1;
+  let color = 0x000000;
   let tool = "brush";
   let size = 1;
   let readyAt = 0;
@@ -36,7 +47,8 @@
     offImg.data[p] = r; offImg.data[p + 1] = g; offImg.data[p + 2] = b; offImg.data[p + 3] = 255;
   }
 
-  function paintColor() { return tool === "eraser" ? 0 : color; }
+  function paintRGB() { return tool === "eraser" ? WHITE : color; }
+  function inkAt(rgb, i) { return ink(rgb, i % gridW, Math.floor(i / gridW)); }
 
   let queued = false;
   function redraw() {
@@ -50,15 +62,18 @@
       const cw = canvas.width / gridW;
       const preview = stroke ? stroke.cells : tool === "text" && hover && !pointers.size ? textCells(hover) : null;
       if (preview) {
-        const [r, g, b] = COLORS[paintColor()];
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        for (const i of preview) ctx.fillRect((i % gridW) * cw, Math.floor(i / gridW) * cw, cw, cw);
+        const rgb = paintRGB();
+        for (const i of preview) {
+          const [r, g, b] = COLORS[inkAt(rgb, i)];
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+          ctx.fillRect((i % gridW) * cw, Math.floor(i / gridW) * cw, cw, cw);
+        }
       }
       if (layer && layer.complete) ctx.drawImage(layer, 0, 0, canvas.width, canvas.height);
       if (hover && tool !== "move" && tool !== "text") {
         const [x0, y0] = brushOrigin(hover.x, hover.y);
         ctx.lineWidth = 2;
-        ctx.strokeStyle = paintColor() === 2 ? "#000" : "#f00";
+        ctx.strokeStyle = paintRGB() === RED ? "#000" : "#f00";
         ctx.strokeRect(x0 * cw + 1, y0 * cw + 1, size * cw - 2, size * cw - 2);
       }
     });
@@ -306,8 +321,8 @@
   }
 
   async function commitStroke() {
-    const c = paintColor();
-    const idx = [...stroke.cells].filter((i) => cells[i] !== c);
+    const rgb = paintRGB();
+    const idx = [...stroke.cells].filter((i) => cells[i] !== inkAt(rgb, i));
     stroke = null;
     if (!idx.length) { redraw(); return; }
     if (idx.length > MAX_CELLS) {
@@ -316,7 +331,8 @@
       return;
     }
     const prev = idx.map((i) => cells[i]);
-    idx.forEach((i) => { cells[i] = c; putCell(i, c); });
+    const next = idx.map((i) => inkAt(rgb, i));
+    idx.forEach((i, k) => { cells[i] = next[k]; putCell(i, next[k]); });
     if (tool === "text") textInput.value = "";
     redraw();
     message = null;
@@ -324,13 +340,13 @@
       const res = await fetch("/api/pixel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ p: idx.map((i) => [i % gridW, Math.floor(i / gridW)]), c }),
+        body: JSON.stringify({ p: idx.map((i) => [i % gridW, Math.floor(i / gridW)]), rgb }),
       });
       const body = await res.json().catch(() => ({}));
       if (body.retry_after != null) readyAt = Date.now() + body.retry_after * 1000;
       if (!res.ok) throw new Error(body.error || res.statusText);
     } catch (err) {
-      idx.forEach((i, k) => { if (cells[i] === c) { cells[i] = prev[k]; putCell(i, prev[k]); } });
+      idx.forEach((i, k) => { if (cells[i] === next[k]) { cells[i] = prev[k]; putCell(i, prev[k]); } });
       redraw();
       if (Date.now() >= readyAt) showError(String(err.message || err));
     }
@@ -341,10 +357,31 @@
   function pressGroup(selector, match) {
     document.querySelectorAll(selector).forEach((b) => b.setAttribute("aria-pressed", String(match(b))));
   }
-  function pickColor(c) {
-    color = c;
+  const swatches = [...document.querySelectorAll(".swatch")];
+  const custom = document.getElementById("custom");
+  const customSwatch = custom.closest(".swatch");
+  const hexRGB = (hex) => parseInt(hex.slice(1), 16);
+
+  // Shows the dither pattern the colour will paint with.
+  function showCustom() {
+    const rgb = hexRGB(custom.value);
+    const c = document.createElement("canvas");
+    c.width = c.height = 4;
+    const x = c.getContext("2d");
+    for (let y = 0; y < 4; y++) {
+      for (let xx = 0; xx < 4; xx++) {
+        const [r, g, b] = COLORS[ink(rgb, xx, y)];
+        x.fillStyle = `rgb(${r},${g},${b})`;
+        x.fillRect(xx, y, 1, 1);
+      }
+    }
+    customSwatch.style.setProperty("--sw", `url(${c.toDataURL()}) 0 0 / 16px 16px`);
+  }
+
+  function pickColor(b) {
+    color = b === customSwatch ? hexRGB(custom.value) : parseInt(b.dataset.rgb, 16);
     if (tool === "eraser" || tool === "move") pickTool("brush");
-    pressGroup(".swatch", (b) => Number(b.dataset.c) === c);
+    pressGroup(".swatch", (s) => s === b);
     redraw();
   }
   function pickTool(t) {
@@ -367,7 +404,9 @@
   const toolSize = { brush: 1, eraser: 4, circle: 1, text: 1 };
   const sizeGroup = document.getElementById("sizes");
   const SIZES = [...document.querySelectorAll("[data-size]")].map((b) => Number(b.dataset.size));
-  document.querySelectorAll(".swatch").forEach((b) => b.addEventListener("click", () => pickColor(Number(b.dataset.c))));
+  swatches.forEach((b) => b.addEventListener("click", () => pickColor(b)));
+  custom.addEventListener("input", () => { showCustom(); pickColor(customSwatch); });
+  showCustom();
   document.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => pickTool(b.dataset.tool)));
   document.querySelectorAll("[data-size]").forEach((b) => b.addEventListener("click", () => pickSize(Number(b.dataset.size))));
   textInput.addEventListener("input", redraw);
@@ -375,7 +414,7 @@
   const KEYS = { b: "brush", e: "eraser", o: "circle", t: "text", m: "move" };
   window.addEventListener("keydown", (e) => {
     if (e.target.closest("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key >= "1" && e.key <= "3") pickColor(Number(e.key) - 1);
+    if (e.key >= "1" && e.key <= "4") pickColor(swatches[Number(e.key) - 1]);
     else if (KEYS[e.key]) { e.preventDefault(); pickTool(KEYS[e.key]); }
     else if (e.key === "[" || e.key === "]") {
       const i = SIZES.indexOf(size) + (e.key === "]" ? 1 : -1);
@@ -387,7 +426,7 @@
     if (e.key === " ") { spaceHeld = false; viewport.style.cursor = tool === "move" ? "grab" : "crosshair"; }
   });
   pickTool("brush");
-  pressGroup(".swatch", (b) => Number(b.dataset.c) === color);
+  pressGroup(".swatch", (b) => b.dataset.rgb && parseInt(b.dataset.rgb, 16) === color);
 
   // ---- cooldown ------------------------------------------------------------
   function showError(text) {

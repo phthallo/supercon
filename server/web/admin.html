@@ -49,11 +49,9 @@
           <label>z <input name="z" type="number"></label>
           <label>border <input name="border" type="number" min="0" max="64"></label>
         </div>
-        <label>colour
-          <select name="color"><option value="0">white</option><option value="1">black</option><option value="2">red</option></select>
-        </label>
+        <label>colour <input name="color" type="color"></label>
         <label data-for="text box">fill
-          <select name="fill"><option value="-1">none</option><option value="0">white</option><option value="1">black</option><option value="2">red</option></select>
+          <span class="fill-row"><input name="has_fill" type="checkbox" aria-label="has fill"><input name="fill" type="color" aria-label="fill colour"></span>
         </label>
         <label data-for="text">font
           <select name="font">

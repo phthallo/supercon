@@ -50,6 +50,36 @@ var Palette = color.Palette{
 
 var inkPalette = Palette[:3]
 
+// Widget and brush colours are 0xRRGGBB.
+const (
+	RGBWhite = 0xffffff
+	RGBBlack = 0x000000
+	RGBRed   = 0xff0000
+)
+
+var bayer4 = [16]float64{0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5}
+
+// Ink returns the panel colour for rgb at (x, y), using an ordered dither so a flat
+// colour becomes an even mix of white, black and red. paint.js has the same function.
+func Ink(rgb, x, y int) uint8 {
+	r := float64(rgb>>16&0xff) / 255
+	g := float64(rgb>>8&0xff) / 255
+	b := float64(rgb&0xff) / 255
+	red := max(0, r-max(g, b))
+	white := 0.299*r + 0.587*g + 0.114*b - 0.299*red
+	black := 1 - white - red
+	t := (bayer4[(y&3)*4+(x&3)] + 0.5) / 16
+	switch {
+	case t < black:
+		return Black
+	case t < black+red:
+		return Red
+	}
+	return White
+}
+
+func solid(c uint8) func(x, y int) uint8 { return func(int, int) uint8 { return c } }
+
 // Fonts maps the widget font name to its TTF. The admin page lists the same names.
 var Fonts = map[string][]byte{
 	"mono":      gomono.TTF,
@@ -132,10 +162,20 @@ func fillRect(img *image.Paletted, r image.Rectangle, c uint8) {
 	}
 }
 
+func fillInk(img *image.Paletted, r image.Rectangle, rgb int) {
+	r = r.Intersect(img.Rect)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		row := img.Pix[y*img.Stride:]
+		for x := r.Min.X; x < r.Max.X; x++ {
+			row[x] = Ink(rgb, x, y)
+		}
+	}
+}
+
 func drawWidget(img *image.Paletted, w Widget) {
 	r := image.Rect(w.X, w.Y, w.X+w.W, w.Y+w.H)
 	if w.Fill >= 0 {
-		fillRect(img, r, uint8(w.Fill))
+		fillInk(img, r, w.Fill)
 	}
 	switch w.Kind {
 	case KindText:
@@ -152,10 +192,10 @@ func drawWidget(img *image.Paletted, w Widget) {
 	}
 	if b := w.Border; b > 0 {
 		c := w.Color
-		fillRect(img, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+b), c)
-		fillRect(img, image.Rect(r.Min.X, r.Max.Y-b, r.Max.X, r.Max.Y), c)
-		fillRect(img, image.Rect(r.Min.X, r.Min.Y, r.Min.X+b, r.Max.Y), c)
-		fillRect(img, image.Rect(r.Max.X-b, r.Min.Y, r.Max.X, r.Max.Y), c)
+		fillInk(img, image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+b), c)
+		fillInk(img, image.Rect(r.Min.X, r.Max.Y-b, r.Max.X, r.Max.Y), c)
+		fillInk(img, image.Rect(r.Min.X, r.Min.Y, r.Min.X+b, r.Max.Y), c)
+		fillInk(img, image.Rect(r.Max.X-b, r.Min.Y, r.Max.X, r.Max.Y), c)
 	}
 }
 
@@ -189,7 +229,7 @@ func drawText(img *image.Paletted, r image.Rectangle, w Widget) {
 	for py := clip.Min.Y; py < clip.Max.Y; py++ {
 		for px := clip.Min.X; px < clip.Max.X; px++ {
 			if mask.AlphaAt(px-inner.Min.X, py-inner.Min.Y).A >= 0x80 {
-				img.Pix[py*img.Stride+px] = w.Color
+				img.Pix[py*img.Stride+px] = Ink(w.Color, px, py)
 			}
 		}
 	}

@@ -33,8 +33,8 @@ type Widget struct {
 	W        int    `json:"w"`
 	H        int    `json:"h"`
 	Z        int    `json:"z"`
-	Color    uint8  `json:"color"`
-	Fill     int    `json:"fill"`
+	Color    int    `json:"color"`
+	Fill     int    `json:"fill"` // -1 for none
 	Border   int    `json:"border"`
 	Text     string `json:"text"`
 	FontSize int    `json:"font_size"`
@@ -55,7 +55,7 @@ type WidgetPatch struct {
 	W        *int    `json:"w"`
 	H        *int    `json:"h"`
 	Z        *int    `json:"z"`
-	Color    *uint8  `json:"color"`
+	Color    *int    `json:"color"`
 	Fill     *int    `json:"fill"`
 	Border   *int    `json:"border"`
 	Text     *string `json:"text"`
@@ -143,6 +143,9 @@ CREATE TABLE IF NOT EXISTS widgets (
 	if err := migrateLog(db); err != nil {
 		return nil, fmt.Errorf("migrate paint_log: %w", err)
 	}
+	if err := migrateWidgetRGB(db); err != nil {
+		return nil, fmt.Errorf("migrate widget colours: %w", err)
+	}
 	if _, err := db.Exec(`
 CREATE INDEX IF NOT EXISTS paint_log_ip ON paint_log (ip);
 CREATE TABLE IF NOT EXISTS bans (ip TEXT PRIMARY KEY, ts INTEGER NOT NULL);
@@ -202,18 +205,22 @@ func (s *Store) Canvas() []byte {
 
 // Paint sets every cell in cells to c in one transaction and returns the cells that changed.
 // Cells must be in range.
-func (s *Store) Paint(cells [][2]int, c uint8, ip, cookie string) ([][2]int, error) {
+// Paint sets each cell to colorAt(x, y) and returns the cells that changed, by colour.
+func (s *Store) Paint(cells [][2]int, colorAt func(x, y int) uint8, ip, cookie string) (map[uint8][][2]int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := append([]byte(nil), s.canvas...)
-	changed := make([][2]int, 0, len(cells))
+	changed := map[uint8][][2]int{}
+	n := 0
 	for _, p := range cells {
+		c := colorAt(p[0], p[1])
 		if i := p[1]*GridW + p[0]; next[i] != c {
 			next[i] = c
-			changed = append(changed, p)
+			changed[c] = append(changed[c], p)
+			n++
 		}
 	}
-	if len(changed) == 0 {
+	if n == 0 {
 		return changed, nil
 	}
 	tx, err := s.db.Begin()
@@ -230,9 +237,11 @@ func (s *Store) Paint(cells [][2]int, c uint8, ip, cookie string) ([][2]int, err
 	}
 	defer stmt.Close()
 	now := time.Now().Unix()
-	for _, p := range changed {
-		if _, err := stmt.Exec(p[0], p[1], c, ip, cookie, now); err != nil {
-			return nil, err
+	for c, ps := range changed {
+		for _, p := range ps {
+			if _, err := stmt.Exec(p[0], p[1], c, ip, cookie, now); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -285,12 +294,36 @@ func (s *Store) widgetsLocked() []Widget {
 	return out
 }
 
+// migrateWidgetRGB turns widget colours from palette indices (0 white, 1 black, 2 red) into 0xRRGGBB.
+func migrateWidgetRGB(db *sql.DB) error {
+	var ver int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil || ver >= 3 {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		`UPDATE widgets SET
+			color = CASE color WHEN 0 THEN 16777215 WHEN 2 THEN 16711680 ELSE 0 END,
+			fill = CASE fill WHEN 0 THEN 16777215 WHEN 1 THEN 0 WHEN 2 THEN 16711680 ELSE -1 END`,
+		`PRAGMA user_version = 3`,
+	} {
+		if _, err := tx.Exec(q); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func NewWidget(kind string) Widget {
-	w := Widget{Kind: kind, X: 40, Y: 40, W: 240, H: 120, Color: Black, Fill: -1, FontSize: 32, Font: "mono", Align: "left"}
+	w := Widget{Kind: kind, X: 40, Y: 40, W: 240, H: 120, Color: RGBBlack, Fill: -1, FontSize: 32, Font: "mono", Align: "left"}
 	switch kind {
 	case KindText:
 		w.Text = "hello"
-		w.Fill = int(White)
+		w.Fill = RGBWhite
 	case KindBox:
 		w.Border = 4
 	}
@@ -314,9 +347,7 @@ func (p WidgetPatch) apply(w *Widget) {
 	set(&w.Fill, p.Fill)
 	set(&w.Border, p.Border)
 	set(&w.FontSize, p.FontSize)
-	if p.Color != nil {
-		w.Color = *p.Color
-	}
+	set(&w.Color, p.Color)
 	if p.Text != nil {
 		w.Text = *p.Text
 	}
@@ -339,10 +370,10 @@ func (w *Widget) validate() error {
 		return fmt.Errorf("size must be within %dx%d", PanelW, PanelH)
 	case w.X <= -w.W || w.X >= PanelW || w.Y <= -w.H || w.Y >= PanelH:
 		return errors.New("widget is entirely off screen")
-	case w.Color > Red:
-		return errors.New("color must be 0 (white), 1 (black) or 2 (red)")
-	case w.Fill < -1 || w.Fill > int(Red):
-		return errors.New("fill must be -1 (none) or a color")
+	case w.Color < 0 || w.Color > RGBWhite:
+		return errors.New("color must be 0xRRGGBB")
+	case w.Fill < -1 || w.Fill > RGBWhite:
+		return errors.New("fill must be -1 (none) or 0xRRGGBB")
 	case w.Border < 0 || w.Border > 64:
 		return errors.New("border must be 0-64")
 	case w.FontSize < 8 || w.FontSize > 300:

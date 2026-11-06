@@ -20,9 +20,9 @@ func openTestStore(t *testing.T) *Store {
 
 func TestRemovePainterRestoresWhatWasUnderneath(t *testing.T) {
 	s := openTestStore(t)
-	s.Paint([][2]int{{1, 1}, {2, 1}}, Red, "good", "a")
-	s.Paint([][2]int{{2, 1}, {3, 1}}, Black, "bad", "b")
-	s.Paint([][2]int{{3, 1}}, Red, "good", "a")
+	s.Paint([][2]int{{1, 1}, {2, 1}}, solid(Red), "good", "a")
+	s.Paint([][2]int{{2, 1}, {3, 1}}, solid(Black), "bad", "b")
+	s.Paint([][2]int{{3, 1}}, solid(Red), "good", "a")
 
 	cells, _ := s.PainterCells("bad")
 	if len(cells) != 1 || cells[0] != [2]int{2, 1} {
@@ -47,11 +47,11 @@ func TestRemovePainterRestoresWhatWasUnderneath(t *testing.T) {
 
 func TestRemovePainterIgnoresPaintBeforeClear(t *testing.T) {
 	s := openTestStore(t)
-	s.Paint([][2]int{{0, 0}}, Red, "good", "a")
+	s.Paint([][2]int{{0, 0}}, solid(Red), "good", "a")
 	if err := s.ClearCanvas(); err != nil {
 		t.Fatal(err)
 	}
-	s.Paint([][2]int{{0, 0}}, Black, "bad", "b")
+	s.Paint([][2]int{{0, 0}}, solid(Black), "bad", "b")
 	if _, err := s.RemovePainter("bad"); err != nil {
 		t.Fatal(err)
 	}

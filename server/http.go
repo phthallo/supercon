@@ -222,8 +222,9 @@ func (s *Server) handlePixel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		P [][2]int
-		C uint8
+		P   [][2]int
+		C   uint8
+		RGB *int // dithered per cell; overrides C
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
@@ -239,7 +240,14 @@ func (s *Server) handlePixel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if body.C > Red {
+	colorAt := solid(body.C)
+	if rgb := body.RGB; rgb != nil {
+		if *rgb < 0 || *rgb > RGBWhite {
+			jsonError(w, http.StatusBadRequest, "bad colour")
+			return
+		}
+		colorAt = func(x, y int) uint8 { return Ink(*rgb, x, y) }
+	} else if body.C > Red {
 		jsonError(w, http.StatusBadRequest, "bad colour")
 		return
 	}
@@ -250,15 +258,15 @@ func (s *Server) handlePixel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "cooling down", "retry_after": seconds(wait)})
 		return
 	}
-	changed, err := s.store.Paint(body.P, body.C, ip, id)
+	changed, err := s.store.Paint(body.P, colorAt, ip, id)
 	if err != nil {
 		s.limiter.Refund(ip, id)
 		log.Printf("paint: %v", err)
 		jsonError(w, http.StatusInternalServerError, "Failed to save. Try again in a moment.")
 		return
 	}
-	if len(changed) > 0 {
-		s.hub.Publish(Event{T: "px", P: changed, C: body.C})
+	for c, cells := range changed {
+		s.hub.Publish(Event{T: "px", P: cells, C: c})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"retry_after": seconds(wait)})
 }

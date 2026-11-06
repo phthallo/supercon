@@ -35,7 +35,7 @@ Put a module in `overlays/<name>/apps/`. Every `BaseApp` subclass in it shows up
 
 ## Ink canvas
 
-A website where anyone paints a 240×168 grid in white, black and red. The admin places text, box and image widgets on top at `/admin`, and can see each IP's pixels, remove them or block the IP. The badge's Ink app downloads the combined 960×672 frame. Live at https://ink.underwhelm.ing.
+A website where anyone paints a 240×168 grid in any colour, dithered to the panel's white, black and red. The admin places text, box and image widgets on top at `/admin`, and can see each IP's pixels, remove them or block the IP. The badge's Ink app downloads the combined 960×672 frame. Live at https://ink.underwhelm.ing.
 
 Other people install it from the site's `/install` page, which also explains hosting your own copy. It copies `apps/ink.py` onto a badge or flashes the whole image, then writes the wifi networks and the site's URL to the badge. `server/firmware/` holds those files:
 
