@@ -23,7 +23,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("PAINT_COOLDOWN: %v", err)
 	}
-	store, err := OpenStore(env("DB_PATH", "ink.db"))
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL is empty; set it to a postgres:// URL")
+	}
+	store, err := OpenStore(dbURL, os.Getenv("IMPORT_SQLITE"))
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}

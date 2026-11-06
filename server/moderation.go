@@ -1,49 +1,9 @@
 package main
 
 import (
-	"database/sql"
 	"sort"
 	"time"
 )
-
-// Paints logged before this time (the deploy that halved the cells) use the 120×84 grid.
-const gridChangeTS = 1793999748
-
-// migrateLog rewrites old-grid paint_log rows as 2×2 blocks, keeping log order.
-func migrateLog(db *sql.DB) error {
-	var ver int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil || ver >= 1 {
-		return err
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	steps := []struct {
-		q    string
-		args []any
-	}{
-		{`CREATE TABLE paint_log_new (
-			id INTEGER PRIMARY KEY, x INTEGER NOT NULL, y INTEGER NOT NULL, c INTEGER NOT NULL,
-			ip TEXT NOT NULL, cookie TEXT NOT NULL, ts INTEGER NOT NULL)`, nil},
-		{`INSERT INTO paint_log_new (x, y, c, ip, cookie, ts)
-			SELECT p.x*2 + d.dx, p.y*2 + d.dy, p.c, p.ip, p.cookie, p.ts
-			FROM paint_log p, (SELECT 0 AS dx, 0 AS dy UNION ALL SELECT 1, 0 UNION ALL SELECT 0, 1 UNION ALL SELECT 1, 1) d
-			WHERE p.ts < ? ORDER BY p.id, d.dy, d.dx`, []any{gridChangeTS}},
-		{`INSERT INTO paint_log_new (x, y, c, ip, cookie, ts)
-			SELECT x, y, c, ip, cookie, ts FROM paint_log WHERE ts >= ? ORDER BY id`, []any{gridChangeTS}},
-		{`DROP TABLE paint_log`, nil},
-		{`ALTER TABLE paint_log_new RENAME TO paint_log`, nil},
-		{`PRAGMA user_version = 1`, nil},
-	}
-	for _, st := range steps {
-		if _, err := tx.Exec(st.q, st.args...); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
 
 type Painter struct {
 	IP       string `json:"ip"`
@@ -63,7 +23,7 @@ func (s *Store) scanLog(skip string) (owner []string, prev []int16, err error) {
 	for i := range prev {
 		prev[i], last[i] = -1, -1
 	}
-	rows, err := s.db.Query(`SELECT x, y, c, ip FROM paint_log WHERE id > ? ORDER BY id`, s.clearedAfter)
+	rows, err := s.db.Query(`SELECT x, y, c, ip FROM paint_log WHERE id > $1 ORDER BY id`, s.clearedAfter)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -181,10 +141,10 @@ func (s *Store) RemovePainter(ip string) (map[uint8][][2]int, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM paint_log WHERE ip = ?`, ip); err != nil {
+	if _, err := tx.Exec(`DELETE FROM paint_log WHERE ip = $1`, ip); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, next); err != nil {
+	if _, err := tx.Exec(`UPDATE canvas SET data = $1 WHERE id = 1`, next); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -202,9 +162,9 @@ func (s *Store) SetBlocked(ip string, blocked bool) error {
 	defer s.mu.Unlock()
 	var err error
 	if blocked {
-		_, err = s.db.Exec(`INSERT OR IGNORE INTO bans (ip, ts) VALUES (?, ?)`, ip, time.Now().Unix())
+		_, err = s.db.Exec(`INSERT INTO bans (ip, ts) VALUES ($1, $2) ON CONFLICT DO NOTHING`, ip, time.Now().Unix())
 	} else {
-		_, err = s.db.Exec(`DELETE FROM bans WHERE ip = ?`, ip)
+		_, err = s.db.Exec(`DELETE FROM bans WHERE ip = $1`, ip)
 	}
 	if err != nil {
 		return err

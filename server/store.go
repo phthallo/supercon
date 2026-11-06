@@ -9,12 +9,11 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"strings"
 	"sync"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "golang.org/x/image/webp"
-	_ "modernc.org/sqlite"
 )
 
 const (
@@ -89,68 +88,45 @@ type Store struct {
 	layer        *image.Paletted
 }
 
-func OpenStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+// OpenStore connects to Postgres and creates the tables. A non-empty sqlitePath is
+// copied into the database once, if the database has no paint or widgets yet.
+func OpenStore(url, sqlitePath string) (*Store, error) {
+	db, err := sql.Open("pgx", url)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`
-CREATE TABLE IF NOT EXISTS canvas (id INTEGER PRIMARY KEY CHECK (id = 1), data BLOB NOT NULL);
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS canvas (id INTEGER PRIMARY KEY CHECK (id = 1), data BYTEA NOT NULL);
 CREATE TABLE IF NOT EXISTS paint_log (
-	id INTEGER PRIMARY KEY, x INTEGER NOT NULL, y INTEGER NOT NULL, c INTEGER NOT NULL,
-	ip TEXT NOT NULL, cookie TEXT NOT NULL, ts INTEGER NOT NULL);
+	id BIGSERIAL PRIMARY KEY, x INTEGER NOT NULL, y INTEGER NOT NULL, c INTEGER NOT NULL,
+	ip TEXT NOT NULL, cookie TEXT NOT NULL, ts BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS paint_log_ip ON paint_log (ip);
 CREATE TABLE IF NOT EXISTS widgets (
-	id INTEGER PRIMARY KEY, kind TEXT NOT NULL, x INTEGER NOT NULL, y INTEGER NOT NULL,
+	id BIGSERIAL PRIMARY KEY, kind TEXT NOT NULL, x INTEGER NOT NULL, y INTEGER NOT NULL,
 	w INTEGER NOT NULL, h INTEGER NOT NULL, z INTEGER NOT NULL, color INTEGER NOT NULL,
 	fill INTEGER NOT NULL, border INTEGER NOT NULL, text TEXT NOT NULL, font_size INTEGER NOT NULL,
-	align TEXT NOT NULL DEFAULT 'left', image_src BLOB, updated_at INTEGER NOT NULL,
-	font TEXT NOT NULL DEFAULT 'mono', grey INTEGER NOT NULL DEFAULT 0);`)
-	if err != nil {
+	font TEXT NOT NULL, align TEXT NOT NULL, grey BOOLEAN NOT NULL, image_src BYTEA, updated_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS bans (ip TEXT PRIMARY KEY, ts BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value BIGINT NOT NULL);`); err != nil {
+		db.Close()
 		return nil, err
 	}
-	// Databases created before these columns existed.
-	for _, col := range []string{`font TEXT NOT NULL DEFAULT 'mono'`, `grey INTEGER NOT NULL DEFAULT 0`} {
-		if _, err := db.Exec(`ALTER TABLE widgets ADD COLUMN ` + col); err != nil &&
-			!strings.Contains(err.Error(), "duplicate column") {
-			return nil, err
+	if _, err := db.Exec(`INSERT INTO canvas (id, data) VALUES (1, $1) ON CONFLICT DO NOTHING`, make([]byte, GridW*GridH)); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if sqlitePath != "" {
+		if err := importSQLite(db, sqlitePath); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("import %s: %w", sqlitePath, err)
 		}
 	}
 	s := &Store{db: db, widgets: map[int64]*Widget{}, epoch: time.Now().Unix()}
-	if err := db.QueryRow(`SELECT data FROM canvas WHERE id = 1`).Scan(&s.canvas); errors.Is(err, sql.ErrNoRows) {
-		s.canvas = make([]byte, GridW*GridH)
-		if _, err := db.Exec(`INSERT INTO canvas (id, data) VALUES (1, ?)`, s.canvas); err != nil {
-			return nil, err
-		}
-	} else if err != nil {
+	if err := db.QueryRow(`SELECT data FROM canvas WHERE id = 1`).Scan(&s.canvas); err != nil {
 		return nil, err
-	}
-	// The grid was 120×84 before the cells were halved to 4 panel pixels.
-	if oldW, oldH := 120, 84; len(s.canvas) == oldW*oldH && oldW*2 == GridW && oldH*2 == GridH {
-		up := make([]byte, GridW*GridH)
-		for i := range up {
-			x, y := i%GridW, i/GridW
-			up[i] = s.canvas[(y/2)*oldW+x/2]
-		}
-		if _, err := db.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, up); err != nil {
-			return nil, err
-		}
-		s.canvas = up
 	}
 	if len(s.canvas) != GridW*GridH {
 		return nil, fmt.Errorf("canvas blob is %d bytes, want %d", len(s.canvas), GridW*GridH)
-	}
-	if err := migrateLog(db); err != nil {
-		return nil, fmt.Errorf("migrate paint_log: %w", err)
-	}
-	if err := migrateWidgetRGB(db); err != nil {
-		return nil, fmt.Errorf("migrate widget colours: %w", err)
-	}
-	if _, err := db.Exec(`
-CREATE INDEX IF NOT EXISTS paint_log_ip ON paint_log (ip);
-CREATE TABLE IF NOT EXISTS bans (ip TEXT PRIMARY KEY, ts INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);`); err != nil {
-		return nil, err
 	}
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'cleared_after'`).Scan(&s.clearedAfter); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -203,9 +179,8 @@ func (s *Store) Canvas() []byte {
 	return append([]byte(nil), s.canvas...)
 }
 
-// Paint sets every cell in cells to c in one transaction and returns the cells that changed.
-// Cells must be in range.
-// Paint sets each cell to colorAt(x, y) and returns the cells that changed, by colour.
+// Paint sets each cell to colorAt(x, y) in one transaction and returns the cells
+// that changed, by colour. Cells must be in range.
 func (s *Store) Paint(cells [][2]int, colorAt func(x, y int) uint8, ip, cookie string) (map[uint8][][2]int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -228,21 +203,19 @@ func (s *Store) Paint(cells [][2]int, colorAt func(x, y int) uint8, ip, cookie s
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, next); err != nil {
+	if _, err := tx.Exec(`UPDATE canvas SET data = $1 WHERE id = 1`, next); err != nil {
 		return nil, err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO paint_log (x, y, c, ip, cookie, ts) VALUES (?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return nil, err
-	}
-	defer stmt.Close()
-	now := time.Now().Unix()
+	xs, ys, cs := make([]int32, 0, n), make([]int32, 0, n), make([]int32, 0, n)
 	for c, ps := range changed {
 		for _, p := range ps {
-			if _, err := stmt.Exec(p[0], p[1], c, ip, cookie, now); err != nil {
-				return nil, err
-			}
+			xs, ys, cs = append(xs, int32(p[0])), append(ys, int32(p[1])), append(cs, int32(c))
 		}
+	}
+	if _, err := tx.Exec(`INSERT INTO paint_log (x, y, c, ip, cookie, ts)
+		SELECT x, y, c, $4, $5, $6 FROM unnest($1::int[], $2::int[], $3::int[]) AS t(x, y, c)`,
+		xs, ys, cs, ip, cookie, time.Now().Unix()); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -265,10 +238,10 @@ func (s *Store) ClearCanvas() error {
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM paint_log`).Scan(&last); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE canvas SET data = ? WHERE id = 1`, blank); err != nil {
+	if _, err := tx.Exec(`UPDATE canvas SET data = $1 WHERE id = 1`, blank); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO meta (key, value) VALUES ('cleared_after', ?)
+	if _, err := tx.Exec(`INSERT INTO meta (key, value) VALUES ('cleared_after', $1)
 		ON CONFLICT (key) DO UPDATE SET value = excluded.value`, last); err != nil {
 		return err
 	}
@@ -292,30 +265,6 @@ func (s *Store) widgetsLocked() []Widget {
 		out = append(out, *w)
 	}
 	return out
-}
-
-// migrateWidgetRGB turns widget colours from palette indices (0 white, 1 black, 2 red) into 0xRRGGBB.
-func migrateWidgetRGB(db *sql.DB) error {
-	var ver int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&ver); err != nil || ver >= 3 {
-		return err
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, q := range []string{
-		`UPDATE widgets SET
-			color = CASE color WHEN 0 THEN 16777215 WHEN 2 THEN 16711680 ELSE 0 END,
-			fill = CASE fill WHEN 0 THEN 16777215 WHEN 1 THEN 0 WHEN 2 THEN 16711680 ELSE -1 END`,
-		`PRAGMA user_version = 3`,
-	} {
-		if _, err := tx.Exec(q); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 func NewWidget(kind string) Widget {
@@ -420,13 +369,12 @@ func (s *Store) CreateWidget(w Widget) (Widget, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.db.Exec(`INSERT INTO widgets (kind, x, y, w, h, z, color, fill, border, text, font_size, font, align, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.Kind, w.X, w.Y, w.W, w.H, w.Z, w.Color, w.Fill, w.Border, w.Text, w.FontSize, w.Font, w.Align, time.Now().Unix())
-	if err != nil {
+	if err := s.db.QueryRow(`INSERT INTO widgets (kind, x, y, w, h, z, color, fill, border, text, font_size, font, align, grey, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
+		w.Kind, w.X, w.Y, w.W, w.H, w.Z, w.Color, w.Fill, w.Border, w.Text, w.FontSize, w.Font, w.Align, w.Grey, time.Now().Unix(),
+	).Scan(&w.ID); err != nil {
 		return Widget{}, err
 	}
-	w.ID, _ = res.LastInsertId()
 	s.widgets[w.ID] = &w
 	s.version++
 	s.widgetVersion++
@@ -454,8 +402,8 @@ func (s *Store) UpdateWidget(id int64, p WidgetPatch, src []byte) (Widget, error
 			return Widget{}, err
 		}
 	}
-	_, err := s.db.Exec(`UPDATE widgets SET kind = ?, x = ?, y = ?, w = ?, h = ?, z = ?, color = ?, fill = ?, border = ?,
-		text = ?, font_size = ?, font = ?, align = ?, grey = ?, image_src = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.Exec(`UPDATE widgets SET kind = $1, x = $2, y = $3, w = $4, h = $5, z = $6, color = $7, fill = $8, border = $9,
+		text = $10, font_size = $11, font = $12, align = $13, grey = $14, image_src = $15, updated_at = $16 WHERE id = $17`,
 		next.Kind, next.X, next.Y, next.W, next.H, next.Z, next.Color, next.Fill, next.Border,
 		next.Text, next.FontSize, next.Font, next.Align, next.Grey, next.src, time.Now().Unix(), id)
 	if err != nil {
@@ -473,7 +421,7 @@ func (s *Store) DeleteWidget(id int64) error {
 	if _, ok := s.widgets[id]; !ok {
 		return ErrNotFound
 	}
-	if _, err := s.db.Exec(`DELETE FROM widgets WHERE id = ?`, id); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM widgets WHERE id = $1`, id); err != nil {
 		return err
 	}
 	delete(s.widgets, id)

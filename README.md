@@ -58,14 +58,19 @@ Server:
 
 ```sh
 cd server
-ADMIN_PASSWORD=secret go run .      # http://localhost:8080, admin at /admin
-go test ./...
+podman run -d --name ink-pg -p 127.0.0.1:5433:5432 -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=ink postgres:17
+export DATABASE_URL='postgres://postgres:dev@127.0.0.1:5433/ink?sslmode=disable'
+ADMIN_PASSWORD=secret go run .              # http://localhost:8080, admin at /admin
+TEST_DATABASE_URL=$DATABASE_URL go test ./...   # store tests skip without it
 ```
+
+`docker compose up` in `server/` runs the server with its own Postgres.
 
 | Env | Default | |
 | --- | --- | --- |
 | `ADDR` | `:8080` | |
-| `DB_PATH` | `ink.db` (`/data/ink.db` in Docker) | SQLite file: canvas, paint log, widgets |
+| `DATABASE_URL` | required | Postgres URL: canvas, paint log, widgets |
+| `IMPORT_SQLITE` | empty | Path to an `ink.db` from the SQLite version (schema 3). Copied in on startup when the database has no paint or widgets yet |
 | `ADMIN_PASSWORD` | empty, which disables `/admin` | Basic auth password, any username |
 | `PAINT_COOLDOWN` | `30s` | Per IP and per cookie. `0s` turns it off |
 | `WIFI_SSID`, `WIFI_PASSWORD` | empty | Network prefilled on `/install`. Anyone can read it from the page |

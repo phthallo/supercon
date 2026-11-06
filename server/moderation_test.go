@@ -1,22 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 )
-
-func openTestStore(t *testing.T) *Store {
-	t.Helper()
-	s, err := OpenStore(filepath.Join(t.TempDir(), "ink.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
-}
 
 func TestRemovePainterRestoresWhatWasUnderneath(t *testing.T) {
 	s := openTestStore(t)
@@ -57,49 +45,6 @@ func TestRemovePainterIgnoresPaintBeforeClear(t *testing.T) {
 	}
 	if got := s.Canvas()[0]; got != White {
 		t.Fatalf("cell (0,0) = %d, want white", got)
-	}
-}
-
-func TestMigrateLogExpandsOldGridRows(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ink.db")
-	s, err := OpenStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.Exec(`PRAGMA user_version = 0`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.Exec(`INSERT INTO paint_log (x, y, c, ip, cookie, ts) VALUES (3, 2, 1, 'old', 'a', ?), (3, 2, 2, 'new', 'b', ?)`,
-		gridChangeTS-1, gridChangeTS+1); err != nil {
-		t.Fatal(err)
-	}
-	s.Close()
-
-	s, err = OpenStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	rows, err := s.db.Query(`SELECT x, y, ip FROM paint_log ORDER BY id`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var got []string
-	for rows.Next() {
-		var x, y int
-		var ip string
-		rows.Scan(&x, &y, &ip)
-		got = append(got, fmt.Sprintf("%s:%d,%d", ip, x, y))
-	}
-	want := []string{"old:6,4", "old:7,4", "old:6,5", "old:7,5", "new:3,2"}
-	if len(got) != len(want) {
-		t.Fatalf("rows %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("rows %v, want %v", got, want)
-		}
 	}
 }
 

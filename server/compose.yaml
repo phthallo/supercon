@@ -1,0 +1,28 @@
+services:
+  ink:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://ink:ink@db:5432/ink?sslmode=disable
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      PAINT_COOLDOWN: ${PAINT_COOLDOWN:-30s}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ink
+      POSTGRES_PASSWORD: ink
+      POSTGRES_DB: ink
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "ink"]
+      interval: 2s
+      retries: 15
+    restart: unless-stopped
+volumes:
+  pgdata:
