@@ -764,7 +764,8 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	var code string
 	for range 3 {
-		code = randomCode(8)
+		// 31^4 codes: an unclaimed one lives an hour and claims are rate limited, so guessing is slow.
+		code = randomCode(4)
 		_, err = s.rhythm.db.Exec(`INSERT INTO rhythm_runs (code, song, diff, score, acc, grade, perfect, great, good, miss, max_combo, notes, ip, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 			code, song.ID, body.Diff, want.Score, want.Acc, want.Grade, counts[0], counts[1], counts[2], counts[3], body.MaxCombo, n, ip, now.Unix())
