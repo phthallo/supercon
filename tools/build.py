@@ -2,6 +2,7 @@
 
     .venv/bin/python tools/build.py supercon custom
     .venv/bin/python tools/build.py custom --flash /dev/ttyACM0
+    .venv/bin/python tools/build.py custom --flash /dev/ttyACM0 --fresh
     .venv/bin/python tools/build.py ink --release
 
 --release writes the files the ink site's install page serves to server/firmware/.
@@ -53,18 +54,45 @@ def collect(overlays):
     return files
 
 
-def build_image(files):
+def build_image(files, kept=None):
+    """kept maps device path -> bytes for badge files to carry over where files has no entry."""
     # Imported here so tools/sim/badge-sim can use collect() without the venv.
     from littlefs import LittleFS
 
+    contents = {rel: src.read_bytes() for rel, src in files.items()}
+    for rel, data in (kept or {}).items():
+        contents.setdefault(rel, data)
     fs = LittleFS(block_size=BLOCK_SIZE, block_count=VFS_SIZE // BLOCK_SIZE)
-    for rel, src in sorted(files.items()):
+    for rel, data in sorted(contents.items()):
         parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
         if parent:
             fs.makedirs(parent, exist_ok=True)
         with fs.open(rel, "wb") as out:
-            out.write(src.read_bytes())
+            out.write(data)
     return bytes(fs.context.buffer)
+
+
+def read_badge_data(esptool, port):
+    """Read the badge's filesystem from flash and return its data/ files, minus RUNTIME_FILES.
+
+    Reading flash goes through the bootloader, so it works whatever the badge app is doing."""
+    from littlefs import LittleFS, UserContext
+
+    dump = BUILD / "badge-vfs.bin"
+    subprocess.run([str(esptool), "--port", port, "read-flash", hex(VFS_OFFSET), hex(VFS_SIZE), str(dump)], check=True)
+    fs = LittleFS(
+        context=UserContext(buffer=bytearray(dump.read_bytes())),
+        block_size=BLOCK_SIZE,
+        block_count=VFS_SIZE // BLOCK_SIZE,
+    )
+    kept = {}
+    for root, _, names in fs.walk("data"):
+        for name in names:
+            rel = f"{root}/{name}"
+            if rel not in RUNTIME_FILES:
+                with fs.open(rel, "rb") as f:
+                    kept[rel] = f.read()
+    return kept
 
 
 def release(files, vfs):
@@ -106,7 +134,12 @@ def release(files, vfs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("overlays", nargs="+", help="overlay names under overlays/")
-    parser.add_argument("--flash", metavar="PORT", help="write the image to the badge on this serial port")
+    parser.add_argument(
+        "--flash",
+        metavar="PORT",
+        help="write the image to the badge on this serial port, keeping its data/ files that the image doesn't ship",
+    )
+    parser.add_argument("--fresh", action="store_true", help="with --flash, erase the badge's data/ instead of keeping it")
     parser.add_argument("--stage", action="store_true", help="also copy the merged tree to build/fs/ for inspection")
     parser.add_argument("--release", action="store_true", help="write the install page's files to server/firmware/")
     args = parser.parse_args()
@@ -138,6 +171,12 @@ def main():
 
     if args.flash:
         esptool = Path(sys.executable).parent / "esptool"
+        if not args.fresh:
+            kept = read_badge_data(esptool, args.flash)
+            carried = sorted(rel for rel in kept if rel not in files)
+            print(f"keeping {len(carried)} files from the badge's data/: {', '.join(carried) or 'none'}")
+            out = BUILD / "vfs-flash.bin"
+            out.write_bytes(build_image(files, kept))
         subprocess.run(
             [str(esptool), "--port", args.flash, "write-flash", hex(VFS_OFFSET), str(out)],
             check=True,
