@@ -304,25 +304,7 @@ class Quadrant(BaseApp):
             self.F = {n: Font("%s/%s.qf" % (DATA, n)) for n in ("title", "big", "huge", "body", "small", "grade")}
             self.G = Geometry()
             self._bg = framebuf.FrameBuffer(bytearray(W * H // 8), W, H, framebuf.MONO_HLSB)
-        self.songs = []
-        try:
-            names = sorted(n for n in os.listdir(DATA + "/songs") if n.endswith(".json"))
-        except OSError:
-            names = []
-        for n in names:
-            path = "%s/songs/%s" % (DATA, n)
-            with open(path) as f:
-                song = json.load(f)
-            charts = song.pop("charts")
-            song["path"] = path
-            song["id"] = n[:-5]
-            song["counts"] = {d: len(charts.get(d, ())) for d in DIFFS}
-            self.songs.append(song)
-            del charts
-            gc.collect()
-        self.songs.append({"title": "Calibrate", "artist": "Timing", "bpm": 100, "calib": True,
-                           "duration_ms": (CALIB_NOTES + 3) * 1200,
-                           "counts": {d: CALIB_NOTES for d in DIFFS}})
+        self._load_songs()
         try:
             with open(BEST_PATH) as f:
                 self.best = json.load(f)
@@ -347,6 +329,59 @@ class Quadrant(BaseApp):
         self._shown = None
         display.session_max_frames = 20
         button.clear_presses()
+
+    def _load_songs(self):
+        self.songs = []
+        try:
+            names = sorted(n for n in os.listdir(DATA + "/songs") if n.endswith(".json"))
+        except OSError:
+            names = []
+        for n in names:
+            path = "%s/songs/%s" % (DATA, n)
+            with open(path) as f:
+                song = json.load(f)
+            charts = song.pop("charts")
+            song["path"] = path
+            song["id"] = n[:-5]
+            song["counts"] = {d: len(charts.get(d, ())) for d in DIFFS}
+            # Judgments per chart as the server counts them: a hold is judged at its start and end.
+            song["notes"] = {d: sum(2 if len(x) > 2 else 1 for x in c) for d, c in charts.items()}
+            self.songs.append(song)
+            del charts
+            gc.collect()
+        self.songs.append({"title": "Calibrate", "artist": "Timing", "bpm": 100, "calib": True,
+                           "duration_ms": (CALIB_NOTES + 3) * 1200,
+                           "counts": {d: CALIB_NOTES for d in DIFFS}})
+
+    def _pull_songs(self):
+        """Download songs the server has and the badge lacks or holds an older chart of.
+
+        Songs removed from the server stay on the badge."""
+        local = {s["id"]: s for s in self.songs if "id" in s}
+        changed = False
+        for s in self.net.songs():
+            sid = s.get("id", "")
+            if not sid or not all(c.isdigit() or "a" <= c <= "z" or c == "-" for c in sid):
+                continue
+            have = local.get(sid)
+            if have and all(have.get(k) == s.get(k) for k in ("title", "artist", "bpm", "offset_ms", "notes")):
+                continue
+            full = self.net.song(sid)
+            keep = {k: full[k] for k in ("title", "artist", "bpm", "offset_ms", "duration_ms", "charts") if k in full}
+            tmp = "%s/songs/%s.tmp" % (DATA, sid)
+            with open(tmp, "w") as f:
+                json.dump(keep, f)
+            os.rename(tmp, "%s/songs/%s.json" % (DATA, sid))
+            print("quadrant: pulled", sid)
+            changed = True
+            del full, keep
+            gc.collect()
+        if changed:
+            cur = self.songs[self.sel].get("id") if self.songs else None
+            self._load_songs()
+            for i, s in enumerate(self.songs):
+                if s.get("id") == cur:
+                    self.sel = i
 
     def _best(self, song, diff):
         return self.best.get("%s/%s" % (song["title"], diff))
@@ -396,6 +431,11 @@ class Quadrant(BaseApp):
             print("quadrant: offline", e)
             self.net_err = "OFFLINE"
             self.net_retry = time.ticks_add(time.ticks_ms(), 120000)
+        if self.net:
+            try:
+                self._pull_songs()
+            except Exception as e:
+                print("quadrant: song download", e)
         self.dirty = True
 
     def _player(self, action, **body):

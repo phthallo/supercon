@@ -126,6 +126,12 @@ class Link:
     def command(self, action, **body):
         self.listeners = self._req("POST", "/api/rhythm/player/" + action, body)["listeners"]
 
+    def songs(self):
+        return self._req("GET", "/api/rhythm/songs")["songs"]
+
+    def song(self, sid):
+        return self._req("GET", "/api/rhythm/songs/" + sid)
+
     def submit(self, run):
         """Upload a finished run. Returns the claim code, URL and QR rows."""
         return self._req("POST", "/api/rhythm/runs", run)
