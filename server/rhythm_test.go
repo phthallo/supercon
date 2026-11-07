@@ -111,10 +111,10 @@ func TestDemoSongsParse(t *testing.T) {
 	}
 }
 
-// memRhythm is a Rhythm with the demo songs and no database, for room tests.
+// memRhythm is a Rhythm with the demo songs and no database, for player tests.
 func memRhythm(t *testing.T, now *time.Time) *Rhythm {
 	t.Helper()
-	r, err := newRhythm(nil, "https://quadrant.underwhelm.ing")
+	r, err := newRhythm(nil, "https://quadrant.underwhelm.ing", testBadgeKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,43 +129,48 @@ func memRhythm(t *testing.T, now *time.Time) *Rhythm {
 	return r
 }
 
-func TestRoomLifecycle(t *testing.T) {
+const testBadgeKey = "badge-key"
+
+func TestPlayerKeepsLatestState(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	r := memRhythm(t, &now)
-	code, token, err := r.createRoom()
-	if err != nil || len(code) != 4 || strings.ContainsAny(code, "01OIL") {
-		t.Fatalf("room %q, err %v", code, err)
-	}
-	ch, state, cancel, err := r.subscribe(strings.ToLower(code))
+	ch, state, cancel, err := r.subscribe()
 	if err != nil || state.T != "idle" {
 		t.Fatalf("subscribe: %+v %v", state, err)
 	}
-	defer cancel()
-	start := func(st *RoomState) error {
-		*st = RoomState{T: "start", Song: "demo100", Diff: "hard", StartAt: 5}
+	n, err := r.command(func(st *PlayerState) error {
+		*st = PlayerState{T: "start", Song: "demo100", Diff: "hard", StartAt: 5}
 		return nil
-	}
-	if _, err := r.command(code, "wrong", start); err != errBadToken {
-		t.Fatalf("wrong token: %v", err)
-	}
-	if n, err := r.command(code, token, start); err != nil || n != 1 {
+	})
+	if err != nil || n != 1 {
 		t.Fatalf("start: %d listeners, %v", n, err)
 	}
-	r.command(code, token, func(st *RoomState) error { st.T = "pause"; return nil })
+	r.command(func(st *PlayerState) error { st.T = "pause"; return nil })
 	if got := <-ch; got.T != "pause" || got.Seq != 2 || got.Song != "demo100" {
 		t.Fatalf("subscriber got %+v, want only the latest state", got)
 	}
-
-	now = now.Add(roomTTL - time.Second)
-	if _, _, _, err := r.roomInfo(code); err != nil {
-		t.Fatalf("room gone before ttl: %v", err)
-	}
-	now = now.Add(roomTTL + time.Second)
-	if _, _, _, err := r.roomInfo(code); err != errNoRoom {
-		t.Fatalf("expired room: %v", err)
-	}
+	cancel()
 	if _, ok := <-ch; ok {
-		t.Fatal("subscriber channel still open after expiry")
+		t.Fatal("subscriber channel still open after cancel")
+	}
+}
+
+func TestBadgeKey(t *testing.T) {
+	for _, tc := range []struct {
+		key, header string
+		want        bool
+	}{
+		{testBadgeKey, "Bearer " + testBadgeKey, true},
+		{testBadgeKey, "Bearer nope", false},
+		{testBadgeKey, testBadgeKey, false},
+		{"", "Bearer ", false},
+	} {
+		r, _ := newRhythm(nil, "https://quadrant.underwhelm.ing", tc.key)
+		req := httptest.NewRequest("POST", "/", nil)
+		req.Header.Set("Authorization", tc.header)
+		if got := r.isBadge(req); got != tc.want {
+			t.Errorf("key %q header %q = %v, want %v", tc.key, tc.header, got, tc.want)
+		}
 	}
 }
 
@@ -173,7 +178,7 @@ func TestRoomLifecycle(t *testing.T) {
 func rhythmServer(t *testing.T) (http.Handler, *Rhythm, *time.Time) {
 	t.Helper()
 	s := openTestStore(t)
-	r, err := OpenRhythm(s.db, "https://quadrant.underwhelm.ing")
+	r, err := OpenRhythm(s.db, "https://quadrant.underwhelm.ing", testBadgeKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,8 +202,17 @@ func rhythmServer(t *testing.T) (http.Handler, *Rhythm, *time.Time) {
 
 func call(t *testing.T, h http.Handler, method, url, body string) (int, map[string]any) {
 	t.Helper()
+	return callAs(t, h, "", method, url, body)
+}
+
+// callAs sends the request with key as the badge key, if it is not empty.
+func callAs(t *testing.T, h http.Handler, key, method, url, body string) (int, map[string]any) {
+	t.Helper()
 	req := httptest.NewRequest(method, url, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	var out map[string]any
@@ -279,46 +293,41 @@ func TestRunClaimFlow(t *testing.T) {
 	}
 }
 
-func TestRoomOverHTTP(t *testing.T) {
+func TestPlayerOverHTTP(t *testing.T) {
 	h, r, _ := rhythmServer(t)
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
-	code, room := call(t, h, "POST", "/api/rhythm/rooms", "")
-	if code != 201 {
-		t.Fatalf("create room = %d %v", code, room)
-	}
-	rc, token := room["code"].(string), room["token"].(string)
-
-	resp, err := http.Get(ts.URL + "/api/rhythm/rooms/" + rc + "/events")
+	resp, err := http.Get(ts.URL + "/api/rhythm/player/events")
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("events: %v %v", resp, err)
 	}
 	defer resp.Body.Close()
 	events := bufio.NewScanner(resp.Body)
-	next := func() RoomState {
+	next := func() PlayerState {
 		for events.Scan() {
 			if line, ok := strings.CutPrefix(events.Text(), "data: "); ok {
-				var st RoomState
+				var st PlayerState
 				json.Unmarshal([]byte(line), &st)
 				return st
 			}
 		}
 		t.Fatal("event stream ended")
-		return RoomState{}
+		return PlayerState{}
 	}
 	if st := next(); st.T != "idle" {
 		t.Fatalf("first event %+v", st)
 	}
 
 	startAt := r.serverMS() + 3000
-	if code, out := call(t, h, "POST", "/api/rhythm/rooms/"+rc+"/pause", `{"token":"`+token+`"}`); code != 400 {
+	start := fmt.Sprintf(`{"song":"demo100","diff":"hard","start_at":%f}`, startAt)
+	if code, out := callAs(t, h, testBadgeKey, "POST", "/api/rhythm/player/pause", `{}`); code != 400 {
 		t.Fatalf("pause before start = %d %v", code, out)
 	}
-	if code, _ := call(t, h, "POST", "/api/rhythm/rooms/"+rc+"/start", fmt.Sprintf(`{"token":"nope","song":"demo100","diff":"hard","start_at":%f}`, startAt)); code != 403 {
-		t.Fatalf("start with wrong token = %d", code)
+	if code, _ := callAs(t, h, "nope", "POST", "/api/rhythm/player/start", start); code != 403 {
+		t.Fatalf("start with wrong key = %d", code)
 	}
-	code, out := call(t, h, "POST", "/api/rhythm/rooms/"+rc+"/start", fmt.Sprintf(`{"token":%q,"song":"demo100","diff":"hard","start_at":%f}`, token, startAt))
+	code, out := callAs(t, h, testBadgeKey, "POST", "/api/rhythm/player/start", start)
 	if code != 200 || out["listeners"].(float64) != 1 {
 		t.Fatalf("start = %d %v", code, out)
 	}
@@ -326,12 +335,15 @@ func TestRoomOverHTTP(t *testing.T) {
 		t.Fatalf("start event %+v", st)
 	}
 
-	run := strings.Replace(runJSON([4]int{20, 0, 0, 0}, 20, ""), `{`, fmt.Sprintf(`{"room":%q,"token":%q,`, rc, token), 1)
-	if code, out := call(t, h, "POST", "/api/rhythm/runs", run); code != 201 {
+	// A run without the key is saved but leaves the player alone.
+	if code, out := call(t, h, "POST", "/api/rhythm/runs", runJSON([4]int{10, 5, 5, 0}, 20, "")); code != 201 {
+		t.Fatalf("anonymous run = %d %v", code, out)
+	}
+	if code, out := callAs(t, h, testBadgeKey, "POST", "/api/rhythm/runs", runJSON([4]int{20, 0, 0, 0}, 20, "")); code != 201 {
 		t.Fatalf("run = %d %v", code, out)
 	}
 	if st := next(); st.T != "result" || st.Grade != "S" || !strings.Contains(st.Claim, "/c/") {
-		t.Fatalf("result event %+v", st)
+		t.Fatalf("result event %+v, want the badge's run", st)
 	}
 }
 

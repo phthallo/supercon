@@ -293,7 +293,7 @@ class Quadrant(BaseApp):
         self._bg = None
         self._shown = None
         self.lead = LEAD_MS
-        self.server = None
+        self.cfg = {}
         self.net = None
         self.net_err = None
         self.net_retry = 0
@@ -333,12 +333,12 @@ class Quadrant(BaseApp):
                 cfg = json.load(f)
         except (OSError, ValueError):
             cfg = {}
+        self.cfg = cfg
         try:
             self.lead = int(cfg["lead_ms"])
         except (KeyError, TypeError, ValueError):
             self.lead = LEAD_MS
-        # {"server": "https://quadrant.underwhelm.ing"} turns on the web player room.
-        self.server = cfg.get("server")
+        # "server" and "key" (the server's BADGE_KEY) turn on the web player.
         self.net_retry = time.ticks_ms()
         self.sel = min(self.sel, max(0, len(self.songs) - 1))
         self.state = SELECT
@@ -376,17 +376,20 @@ class Quadrant(BaseApp):
                 self._draw_results()
             display.update()
         elif self.state == SELECT and not self.dirty and display.is_done_updating():
-            self._open_room()
+            self._connect()
         await aio.sleep_ms(20)
 
-    def _open_room(self):
-        """Join wifi and open a room once the song list is showing. Blocks for up to about 20 s."""
-        if not self.server or self.net or time.ticks_diff(time.ticks_ms(), self.net_retry) < 0:
+    def _online(self):
+        return bool(self.cfg.get("server") and self.cfg.get("key"))
+
+    def _connect(self):
+        """Join wifi and sync with the server once the song list is showing. Blocks for up to about 20 s."""
+        if not self._online() or self.net or time.ticks_diff(time.ticks_ms(), self.net_retry) < 0:
             return
         try:
             from lib import qnet
 
-            link = qnet.Link(self.server)
+            link = qnet.Link(self.cfg["server"], self.cfg["key"])
             link.open()
             self.net, self.net_err = link, None
         except Exception as e:
@@ -395,8 +398,8 @@ class Quadrant(BaseApp):
             self.net_retry = time.ticks_add(time.ticks_ms(), 120000)
         self.dirty = True
 
-    def _room(self, action, **body):
-        """Send a room command. Never raises, since the game plays on without the web player."""
+    def _player(self, action, **body):
+        """Send a web player command. Never raises, since the game plays on without the web player."""
         if not self.net or self.game.song.get("calib"):
             return
         try:
@@ -405,10 +408,7 @@ class Quadrant(BaseApp):
                 body["start_at"] = self.net.now() + time.ticks_diff(self.game.t0_us, time.ticks_us()) // 1000
             self.net.command(action, **body)
         except Exception as e:
-            print("quadrant: room", action, e)
-            if str(e).startswith("404"):
-                # The room expired; open a new one on the next visit to the song list.
-                self.net = None
+            print("quadrant: player", action, e)
 
     def _on_press(self, b):
         if self.state == SELECT:
@@ -435,7 +435,7 @@ class Quadrant(BaseApp):
                 elif self.pause_sel == 1:
                     self._start(self.game.song, self.game.diff)
                 else:
-                    self._room("stop")
+                    self._player("stop")
                     self.state = SELECT
                     self.game = None
                 return
@@ -456,11 +456,9 @@ class Quadrant(BaseApp):
     def _save_lead(self, lead):
         self.lead = lead
         try:
-            cfg = {"lead_ms": lead}
-            if self.server:
-                cfg["server"] = self.server
+            self.cfg["lead_ms"] = lead
             with open(CFG_PATH, "w") as f:
-                json.dump(cfg, f)
+                json.dump(self.cfg, f)
         except OSError as e:
             print("quadrant: lead not saved", e)
 
@@ -525,9 +523,9 @@ class Quadrant(BaseApp):
                     print("quadrant: sync", e)
             self._clock(r, s0)
             if resume:
-                self._room("resume")
+                self._player("resume")
             else:
-                self._room("start", song=r.song["id"], diff=r.diff)
+                self._player("start", song=r.song["id"], diff=r.diff)
         while True:
             T = r.next_frame * P
             if T > r.end_ms:
@@ -658,7 +656,7 @@ class Quadrant(BaseApp):
         self.pause_sel = 0
         self.state = PAUSE
         self.dirty = True
-        self._room("pause", pos_ms=max(1, int(r.paused_ms)))
+        self._player("pause", pos_ms=max(1, int(r.paused_ms)))
 
     def _resume(self):
         self.game.resuming = True
@@ -869,12 +867,12 @@ class Quadrant(BaseApp):
         fb, F = display.black, self.F
         fb.fill(0)
         display.red.fill(0)
-        room = None
+        link = None
         if self.net:
-            room = "%s/play   ROOM %s" % (self.net.host, self.net.code)
-        elif self.server:
-            room = self.net_err or "CONNECTING"
-        top_bar(fb, F, "QUADRANT", room)
+            link = self.net.host + "/play"
+        elif self._online():
+            link = self.net_err or "CONNECTING"
+        top_bar(fb, F, "QUADRANT", link)
         hint = [(("-", "+"), "browse"), (("A",), "play"), (("B",), "difficulty")]
         if not self.songs:
             F["body"].draw(fb, "No songs in " + DATA + "/songs", CX, CY, 1, CENTER)

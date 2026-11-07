@@ -37,7 +37,11 @@ func main() {
 	}
 	defer store.Close()
 
-	rhythm, err := OpenRhythm(store.db, env("QUADRANT_URL", "https://quadrant.underwhelm.ing"))
+	badgeKey := os.Getenv("BADGE_KEY")
+	if badgeKey == "" {
+		log.Print("BADGE_KEY is empty; the badge cannot drive the web player")
+	}
+	rhythm, err := OpenRhythm(store.db, env("QUADRANT_URL", "https://quadrant.underwhelm.ing"), badgeKey)
 	if err != nil {
 		log.Fatalf("open quadrant: %v", err)
 	}

@@ -26,20 +26,8 @@
   </header>
 
   <main>
-    <form id="join" class="box join" autocomplete="off">
-      <label for="code">Room code</label>
-      <div class="join-row">
-        <input id="code" class="code-input" maxlength="4" spellcheck="false" autocapitalize="characters" required>
-        <button class="link" type="submit">[ join ]</button>
-      </div>
-      <p id="join-error" class="error" role="alert"></p>
-    </form>
-
-    <section id="room" class="box stage-box" hidden>
-      <div class="room-head">
-        <span>Room <b id="room-code"></b></span>
-        <button class="link" id="leave" type="button">[ leave ]</button>
-      </div>
+    <section id="room" class="box stage-box">
+      <button class="link" id="sound" type="button">[ turn on sound ]</button>
       <h2 id="song-title">Waiting for the badge</h2>
       <p id="song-meta" class="muted" hidden></p>
       <div id="big" class="big" aria-live="polite" hidden></div>

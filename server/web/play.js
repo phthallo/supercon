@@ -9,7 +9,6 @@
   const buffers = new Map();
   let source = null;
   let es = null;
-  let room = null;
   let state = { t: "idle", seq: -1 };
   let resync = 0;
   let frame = 0;
@@ -32,6 +31,7 @@
   function audio() {
     if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
     if (ctx.state === "suspended") ctx.resume();
+    show("sound", false);
     return ctx;
   }
 
@@ -192,7 +192,7 @@
     switch (st.t) {
       case "start":
       case "resume":
-        playFrom(st).catch(() => { $("room-error").textContent = "Failed to load the audio."; });
+        if (ctx) playFrom(st).catch(() => { $("room-error").textContent = "Failed to load the audio."; });
         tick();
         break;
       case "pause":
@@ -213,60 +213,36 @@
     }
   }
 
-  function leave(msg) {
-    if (es) es.close();
-    es = null;
-    stopAudio();
-    clearInterval(resync);
-    cancelAnimationFrame(frame);
-    room = null;
-    state = { t: "idle", seq: -1 };
-    show("room", false);
-    show("join", true);
-    $("join-error").textContent = msg || "";
-    history.replaceState(null, "", "/play");
-  }
-
   function listen() {
-    es = new EventSource(`/api/rhythm/rooms/${room}/events`);
+    es = new EventSource("/api/rhythm/player/events");
     es.onmessage = (e) => apply(JSON.parse(e.data));
-    es.addEventListener("gone", () => leave("That room expired. Make a new one on the badge."));
-    es.onerror = async () => {
-      if (es.readyState !== EventSource.CLOSED) return;
-      const res = await fetch(`/api/rhythm/rooms/${room}`).catch(() => null);
-      if (res && res.status === 404) leave("That room closed. Make a new one on the badge.");
-      else setTimeout(() => room && listen(), 2000);
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) setTimeout(listen, 2000);
     };
   }
 
-  $("join").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    audio();
-    const code = $("code").value.trim().toUpperCase();
-    $("join-error").textContent = "";
+  async function connect() {
     try {
-      const res = await fetch(`/api/rhythm/rooms/${encodeURIComponent(code)}`);
-      if (res.status === 404) {
-        $("join-error").textContent = "No room with that code.";
-        return;
-      }
-      if (!res.ok) throw new Error(res.status);
       await syncClock();
       await songInfo("");
     } catch (err) {
-      $("join-error").textContent = "Failed to connect. Try again in a moment.";
+      $("room-error").textContent = "Failed to reach the server. Retrying.";
+      setTimeout(connect, 5000);
       return;
     }
-    room = code;
-    $("room-code").textContent = code;
-    show("join", false);
-    show("room", true);
-    history.replaceState(null, "", `/play?room=${code}`);
+    $("room-error").textContent = "";
     resync = setInterval(() => syncClock().catch(() => {}), 120000);
     listen();
+  }
+
+  // Browsers only start audio after a click, so the player waits for one.
+  $("sound").addEventListener("click", () => {
+    audio();
+    if (state.t === "start" || state.t === "resume") {
+      playFrom(state).catch(() => { $("room-error").textContent = "Failed to load the audio."; });
+    }
   });
-  $("code").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase(); });
-  $("leave").addEventListener("click", () => leave());
+  connect();
 
   // Calibration: clicks every 500 ms; the offset is the median of how late the taps were.
   const TAP_CLICKS = 16;
@@ -331,8 +307,4 @@
     setOffset(-Math.round(median));
     $("tap-status").textContent = `Set to ${-Math.round(median)} ms.`;
   }
-
-  const q = new URLSearchParams(location.search).get("room");
-  if (q) $("code").value = q.toUpperCase().slice(0, 4);
-  $("code").focus();
 })();

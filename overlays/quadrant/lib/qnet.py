@@ -1,4 +1,4 @@
-"""Link to the Quadrant site: a room the web player joins, a clock shared with the server, and run upload."""
+"""Link to the Quadrant site: web player commands, a clock shared with the server, and run upload."""
 
 import json
 import time
@@ -40,17 +40,18 @@ def connect():
 
 
 class Link:
-    def __init__(self, server):
+    def __init__(self, server, key):
         self.server = server.rstrip("/")
         self.host = self.server.split("://", 1)[-1]
-        self.code = None
-        self.token = None
+        self.auth = "Bearer " + key
         self.base_ms = 0
         self.base_server = 0
         self.listeners = 0
 
     def _req(self, method, path, body=None):
-        r = requests.request(method, self.server + path, json=body, timeout=TIMEOUT_S)
+        # A new dict each time: requests writes Content-Length into the headers it is given.
+        headers = {"Authorization": self.auth}
+        r = requests.request(method, self.server + path, json=body, headers=headers, timeout=TIMEOUT_S)
         try:
             status = r.status_code
             data = r.json()
@@ -61,11 +62,9 @@ class Link:
         return data
 
     def open(self):
-        """Join wifi, sync the clock and create a room."""
+        """Join wifi and sync the clock."""
         connect()
         self.sync()
-        data = self._req("POST", "/api/rhythm/rooms", {})
-        self.code, self.token = data["code"], data["token"]
 
     def sync(self):
         """NTP-style: keep the sample with the shortest round trip."""
@@ -83,10 +82,8 @@ class Link:
         return self.base_server + time.ticks_diff(time.ticks_ms(), self.base_ms)
 
     def command(self, action, **body):
-        body["token"] = self.token
-        self.listeners = self._req("POST", "/api/rhythm/rooms/%s/%s" % (self.code, action), body)["listeners"]
+        self.listeners = self._req("POST", "/api/rhythm/player/" + action, body)["listeners"]
 
     def submit(self, run):
         """Upload a finished run. Returns the claim code, URL and QR rows."""
-        run["room"], run["token"] = self.code, self.token
         return self._req("POST", "/api/rhythm/runs", run)

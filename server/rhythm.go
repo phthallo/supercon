@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,10 +33,8 @@ import (
 var demoSongsFS embed.FS
 
 const (
-	roomTTL       = 30 * time.Minute
 	claimTTL      = time.Hour
-	maxRooms      = 5000
-	maxRoomSubs   = 8
+	maxListeners  = 8
 	maxAudioBytes = 20 << 20
 	maxSongBytes  = 1 << 20
 	maxNameRunes  = 16
@@ -49,11 +46,7 @@ var diffs = []string{"easy", "normal", "hard"}
 // No 0/O or 1/I/L, so a code read off the badge types back unambiguously.
 const codeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
-var (
-	errNoRoom   = errors.New("no such room")
-	errBadToken = errors.New("wrong room token")
-	slugRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
-)
+var slugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
 // Note is [ms, lane] for a tap or [ms, lane, dur_ms] for a hold.
 type Note []int
@@ -70,8 +63,8 @@ type Song struct {
 	Charts     map[string][]Note `json:"charts,omitempty"`
 }
 
-// RoomState is the latest command the badge sent to a room, as the browser receives it.
-type RoomState struct {
+// PlayerState is the latest command the badge sent, as the web player receives it.
+type PlayerState struct {
 	T       string  `json:"t"` // idle, start, pause, resume, stop or result
 	Seq     int64   `json:"seq"`
 	Song    string  `json:"song,omitempty"`
@@ -84,47 +77,41 @@ type RoomState struct {
 	Grade   string  `json:"grade,omitempty"`
 }
 
-type room struct {
-	code, token string
-	last        time.Time
-	state       RoomState
-	subs        map[chan RoomState]struct{}
-}
-
 type Rhythm struct {
-	db      *sql.DB
-	baseURL string
-	host    string
-	now     func() time.Time
+	db       *sql.DB
+	baseURL  string
+	host     string
+	badgeKey string
+	now      func() time.Time
 
 	mu    sync.RWMutex
 	songs map[string]*Song
 
-	roomMu    sync.Mutex
-	rooms     map[string]*room
-	lastSweep time.Time
+	// One badge drives one web player, in memory only.
+	playerMu  sync.Mutex
+	player    PlayerState
+	listeners map[chan PlayerState]struct{}
 
-	runLimit, roomLimit, claimLimit *windowLimiter
+	runLimit, claimLimit *windowLimiter
 }
 
-func newRhythm(db *sql.DB, baseURL string) (*Rhythm, error) {
+func newRhythm(db *sql.DB, baseURL, badgeKey string) (*Rhythm, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Hostname() == "" {
 		return nil, fmt.Errorf("QUADRANT_URL %q is not an absolute URL", baseURL)
 	}
 	r := &Rhythm{
-		db: db, baseURL: strings.TrimRight(baseURL, "/"), host: u.Hostname(), now: time.Now,
-		songs: map[string]*Song{}, rooms: map[string]*room{},
+		db: db, baseURL: strings.TrimRight(baseURL, "/"), host: u.Hostname(), badgeKey: badgeKey, now: time.Now,
+		songs: map[string]*Song{}, player: PlayerState{T: "idle"}, listeners: map[chan PlayerState]struct{}{},
 	}
 	r.runLimit = newWindowLimiter(30, time.Minute, r.clock)
-	r.roomLimit = newWindowLimiter(60, time.Minute, r.clock)
 	r.claimLimit = newWindowLimiter(20, time.Minute, r.clock)
 	return r, nil
 }
 
 // OpenRhythm creates the Quadrant tables, adds the demo songs if missing and loads every song.
-func OpenRhythm(db *sql.DB, baseURL string) (*Rhythm, error) {
-	r, err := newRhythm(db, baseURL)
+func OpenRhythm(db *sql.DB, baseURL, badgeKey string) (*Rhythm, error) {
+	r, err := newRhythm(db, baseURL, badgeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -318,12 +305,6 @@ func randomCode(n int) string {
 	return string(b)
 }
 
-func randomToken() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
 // Scoring, as on the badge.
 
 // osu!mania accuracy weights for perfect, great, good and miss.
@@ -432,122 +413,50 @@ func checkName(raw string) (string, error) {
 	return name, nil
 }
 
-// Rooms. They live in memory only; a restart drops them and the badge makes a new one.
-
-func (r *Rhythm) sweepLocked(now time.Time) {
-	if now.Sub(r.lastSweep) < time.Minute {
-		return
-	}
-	r.lastSweep = now
-	for code, rm := range r.rooms {
-		if now.Sub(rm.last) > roomTTL {
-			r.closeLocked(code, rm)
-		}
-	}
+// isBadge reports whether a request carries the badge key as "Authorization: Bearer KEY".
+func (r *Rhythm) isBadge(req *http.Request) bool {
+	key, ok := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer ")
+	return ok && r.badgeKey != "" && subtle.ConstantTimeCompare([]byte(key), []byte(r.badgeKey)) == 1
 }
 
-func (r *Rhythm) closeLocked(code string, rm *room) {
-	for ch := range rm.subs {
-		close(ch)
-		delete(rm.subs, ch)
-	}
-	delete(r.rooms, code)
-}
-
-// roomLocked returns a live room, closing it if it has expired.
-func (r *Rhythm) roomLocked(code string) (*room, error) {
-	now := r.now()
-	r.sweepLocked(now)
-	rm, ok := r.rooms[strings.ToUpper(code)]
-	if !ok {
-		return nil, errNoRoom
-	}
-	if now.Sub(rm.last) > roomTTL {
-		r.closeLocked(rm.code, rm)
-		return nil, errNoRoom
-	}
-	rm.last = now
-	return rm, nil
-}
-
-func (r *Rhythm) createRoom() (code, token string, err error) {
-	r.roomMu.Lock()
-	defer r.roomMu.Unlock()
-	now := r.now()
-	r.sweepLocked(now)
-	if len(r.rooms) >= maxRooms {
-		return "", "", errors.New("too many rooms open; try again later")
-	}
-	for range 20 {
-		code = randomCode(4)
-		if _, taken := r.rooms[code]; !taken {
-			rm := &room{code: code, token: randomToken(), last: now, state: RoomState{T: "idle"}, subs: map[chan RoomState]struct{}{}}
-			r.rooms[code] = rm
-			return code, rm.token, nil
-		}
-	}
-	return "", "", errors.New("no free room code; try again")
-}
-
-// command applies a badge command to a room and pushes the new state to its browsers.
-func (r *Rhythm) command(code, token string, apply func(*RoomState) error) (int, error) {
-	r.roomMu.Lock()
-	defer r.roomMu.Unlock()
-	rm, err := r.roomLocked(code)
-	if err != nil {
-		return 0, err
-	}
-	if subtle.ConstantTimeCompare([]byte(token), []byte(rm.token)) != 1 {
-		return 0, errBadToken
-	}
-	next := rm.state
+// command applies a badge command to the player and pushes the new state to its listeners.
+func (r *Rhythm) command(apply func(*PlayerState) error) (int, error) {
+	r.playerMu.Lock()
+	defer r.playerMu.Unlock()
+	next := r.player
 	if err := apply(&next); err != nil {
 		return 0, err
 	}
-	next.Seq = rm.state.Seq + 1
-	rm.state = next
-	for ch := range rm.subs {
+	next.Seq = r.player.Seq + 1
+	r.player = next
+	for ch := range r.listeners {
 		select {
 		case <-ch:
 		default:
 		}
 		ch <- next
 	}
-	return len(rm.subs), nil
+	return len(r.listeners), nil
 }
 
-func (r *Rhythm) roomInfo(code string) (string, int, RoomState, error) {
-	r.roomMu.Lock()
-	defer r.roomMu.Unlock()
-	rm, err := r.roomLocked(code)
-	if err != nil {
-		return "", 0, RoomState{}, err
+// subscribe returns a channel holding the player's latest state.
+func (r *Rhythm) subscribe() (<-chan PlayerState, PlayerState, func(), error) {
+	r.playerMu.Lock()
+	defer r.playerMu.Unlock()
+	if len(r.listeners) >= maxListeners {
+		return nil, PlayerState{}, nil, errors.New("too many players open")
 	}
-	return rm.code, len(rm.subs), rm.state, nil
-}
-
-// subscribe returns a channel holding the room's latest state. It is closed when the room expires.
-func (r *Rhythm) subscribe(code string) (<-chan RoomState, RoomState, func(), error) {
-	r.roomMu.Lock()
-	defer r.roomMu.Unlock()
-	rm, err := r.roomLocked(code)
-	if err != nil {
-		return nil, RoomState{}, nil, err
-	}
-	if len(rm.subs) >= maxRoomSubs {
-		return nil, RoomState{}, nil, errors.New("room is full")
-	}
-	ch := make(chan RoomState, 1)
-	rm.subs[ch] = struct{}{}
+	ch := make(chan PlayerState, 1)
+	r.listeners[ch] = struct{}{}
 	cancel := func() {
-		r.roomMu.Lock()
-		defer r.roomMu.Unlock()
-		if _, ok := rm.subs[ch]; ok {
-			delete(rm.subs, ch)
+		r.playerMu.Lock()
+		defer r.playerMu.Unlock()
+		if _, ok := r.listeners[ch]; ok {
+			delete(r.listeners, ch)
 			close(ch)
 		}
 	}
-	return ch, rm.state, cancel, nil
+	return ch, r.player, cancel, nil
 }
 
 // windowLimiter allows limit requests per key in each fixed window. Badges at
@@ -617,10 +526,8 @@ func (s *Server) rhythmAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/rhythm/songs", s.handleSongs)
 	mux.HandleFunc("GET /api/rhythm/songs/{id}", s.handleSong)
 	mux.HandleFunc("GET /api/rhythm/songs/{id}/audio", s.handleSongAudio)
-	mux.HandleFunc("POST /api/rhythm/rooms", s.handleCreateRoom)
-	mux.HandleFunc("GET /api/rhythm/rooms/{code}", s.handleRoom)
-	mux.HandleFunc("GET /api/rhythm/rooms/{code}/events", s.handleRoomEvents)
-	mux.HandleFunc("POST /api/rhythm/rooms/{code}/{action}", s.handleRoomCommand)
+	mux.HandleFunc("GET /api/rhythm/player/events", s.handlePlayerEvents)
+	mux.HandleFunc("POST /api/rhythm/player/{action}", s.handlePlayerCommand)
 	mux.HandleFunc("POST /api/rhythm/runs", s.handleCreateRun)
 	mux.HandleFunc("GET /api/rhythm/claims/{code}", s.handleClaim)
 	mux.HandleFunc("POST /api/rhythm/claims/{code}", s.handleClaimRun)
@@ -694,36 +601,10 @@ func (s *Server) handleSongAudio(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", time.Unix(updated, 0), bytes.NewReader(audio))
 }
 
-func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
-	if !s.rhythm.roomLimit.Allow(s.clientIP(r)) {
-		sendError(w, http.StatusTooManyRequests, "too many rooms; wait a minute")
-		return
-	}
-	code, token, err := s.rhythm.createRoom()
+func (s *Server) handlePlayerEvents(w http.ResponseWriter, r *http.Request) {
+	ch, state, cancel, err := s.rhythm.subscribe()
 	if err != nil {
-		sendError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	sendJSON(w, http.StatusCreated, map[string]any{"code": code, "token": token, "ttl_s": int(roomTTL.Seconds())})
-}
-
-func (s *Server) handleRoom(w http.ResponseWriter, r *http.Request) {
-	code, listeners, state, err := s.rhythm.roomInfo(r.PathValue("code"))
-	if err != nil {
-		sendError(w, http.StatusNotFound, "No room with that code.")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	sendJSON(w, http.StatusOK, map[string]any{"code": code, "listeners": listeners, "state": state})
-}
-
-func (s *Server) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
-	ch, state, cancel, err := s.rhythm.subscribe(r.PathValue("code"))
-	if errors.Is(err, errNoRoom) {
-		http.Error(w, "no such room", http.StatusNotFound)
-		return
-	} else if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	defer cancel()
@@ -731,7 +612,7 @@ func (s *Server) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	rc := http.NewResponseController(w)
-	send := func(st RoomState) bool {
+	send := func(st PlayerState) bool {
 		b, _ := json.Marshal(st)
 		fmt.Fprintf(w, "data: %s\n\n", b)
 		return rc.Flush() == nil
@@ -747,8 +628,6 @@ func (s *Server) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case st, ok := <-ch:
 			if !ok {
-				io.WriteString(w, "event: gone\ndata: {}\n\n")
-				rc.Flush()
 				return
 			}
 			if !send(st) {
@@ -763,9 +642,12 @@ func (s *Server) handleRoomEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleRoomCommand(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePlayerCommand(w http.ResponseWriter, r *http.Request) {
+	if !s.rhythm.isBadge(r) {
+		sendError(w, http.StatusForbidden, "wrong badge key")
+		return
+	}
 	var body struct {
-		Token   string  `json:"token"`
 		Song    string  `json:"song"`
 		Diff    string  `json:"diff"`
 		StartAt float64 `json:"start_at"`
@@ -781,32 +663,32 @@ func (s *Server) handleRoomCommand(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}
-	var apply func(*RoomState) error
+	var apply func(*PlayerState) error
 	switch action := r.PathValue("action"); action {
 	case "start":
-		apply = func(st *RoomState) error {
+		apply = func(st *PlayerState) error {
 			if song := s.rhythm.song(body.Song); song == nil || song.Charts[body.Diff] == nil {
 				return errors.New("unknown song or difficulty")
 			}
 			if err := startAt(); err != nil {
 				return err
 			}
-			*st = RoomState{T: action, Song: body.Song, Diff: body.Diff, StartAt: body.StartAt}
+			*st = PlayerState{T: action, Song: body.Song, Diff: body.Diff, StartAt: body.StartAt}
 			return nil
 		}
 	case "resume":
-		apply = func(st *RoomState) error {
+		apply = func(st *PlayerState) error {
 			if st.T != "pause" {
 				return errors.New("nothing is paused")
 			}
 			if err := startAt(); err != nil {
 				return err
 			}
-			*st = RoomState{T: action, Song: st.Song, Diff: st.Diff, StartAt: body.StartAt}
+			*st = PlayerState{T: action, Song: st.Song, Diff: st.Diff, StartAt: body.StartAt}
 			return nil
 		}
 	case "pause":
-		apply = func(st *RoomState) error {
+		apply = func(st *PlayerState) error {
 			if st.T != "start" && st.T != "resume" {
 				return errors.New("nothing is playing")
 			}
@@ -814,35 +696,28 @@ func (s *Server) handleRoomCommand(w http.ResponseWriter, r *http.Request) {
 			if pos == 0 {
 				pos = now - st.StartAt
 			}
-			*st = RoomState{T: action, Song: st.Song, Diff: st.Diff, PosMS: pos}
+			*st = PlayerState{T: action, Song: st.Song, Diff: st.Diff, PosMS: pos}
 			return nil
 		}
 	case "stop":
-		apply = func(st *RoomState) error {
-			*st = RoomState{T: action, Song: st.Song, Diff: st.Diff}
+		apply = func(st *PlayerState) error {
+			*st = PlayerState{T: action, Song: st.Song, Diff: st.Diff}
 			return nil
 		}
 	default:
 		sendError(w, http.StatusNotFound, "action must be start, pause, resume or stop")
 		return
 	}
-	listeners, err := s.rhythm.command(r.PathValue("code"), body.Token, apply)
-	switch {
-	case errors.Is(err, errNoRoom):
-		sendError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, errBadToken):
-		sendError(w, http.StatusForbidden, err.Error())
-	case err != nil:
+	listeners, err := s.rhythm.command(apply)
+	if err != nil {
 		sendError(w, http.StatusBadRequest, err.Error())
-	default:
-		sendJSON(w, http.StatusOK, map[string]int{"listeners": listeners})
+		return
 	}
+	sendJSON(w, http.StatusOK, map[string]int{"listeners": listeners})
 }
 
 func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Room     string  `json:"room"`
-		Token    string  `json:"token"`
 		Song     string  `json:"song"`
 		Diff     string  `json:"diff"`
 		Score    int     `json:"score"`
@@ -903,9 +778,9 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	claimURL := s.rhythm.baseURL + "/c/" + code
-	if body.Room != "" {
-		s.rhythm.command(body.Room, body.Token, func(st *RoomState) error {
-			*st = RoomState{T: "result", Song: song.ID, Diff: body.Diff, Claim: claimURL, Score: want.Score, Acc: want.Acc, Grade: want.Grade}
+	if s.rhythm.isBadge(r) {
+		s.rhythm.command(func(st *PlayerState) error {
+			*st = PlayerState{T: "result", Song: song.ID, Diff: body.Diff, Claim: claimURL, Score: want.Score, Acc: want.Acc, Grade: want.Grade}
 			return nil
 		})
 	}

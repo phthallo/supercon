@@ -288,28 +288,13 @@ table.board tr.mine td { background: var(--surface); }
 table.board.counts { margin: 16px 0; }
 table.board.counts th, table.board.counts td { text-align: right; }
 
-.join label, .claim label { display: block; margin-bottom: 8px; }
+.claim label { display: block; margin-bottom: 8px; }
 .join-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
-.code-input {
-  font: inherit;
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-  text-align: center;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  width: 7ch;
-  padding: 4px 0 4px 0.3em;
-}
-.code-input:focus-visible, .text-input:focus-visible, .calib input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.text-input:focus-visible, .calib input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .stage-box { padding: 16px; }
-.stage-box, .join, .calib { max-width: 640px; }
+.stage-box, .calib { max-width: 640px; }
 .box .error:empty { display: none; }
-.room-head { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
-.room-head b { letter-spacing: 0.15em; }
 .stage-box h2 { font-size: 1.75rem; color: var(--text); margin: 16px 0 0; overflow-wrap: anywhere; }
 .stage-box h2 + p { margin-top: 0; }
 .big { font-size: 4rem; font-weight: 700; line-height: 1; margin: 16px 0; color: var(--accent); }
