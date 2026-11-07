@@ -9,7 +9,7 @@ tools/sim/badge-sim quadrant --real-refresh --scale 0.7
 
 Overlay names (or paths) come first, as in `tools/build.py`. The merged tree is copied to `tools/sim/fs/` on every run. Runtime writes go to `tools/sim/data/`; delete it to reset. Options are listed at the top of `sim.py`.
 
-Keys: A = User A, Left = Menu -, Right = Menu +, B = User B, Space = Boot.
+Keys: A = User A, Left = Menu +, Right = Menu -, B = User B, Space = Boot.
 
 Use `--real-refresh` for anything timing-related. Full refreshes then take ~6.5 s and delta frames 0.17 s, as measured on driver B.
 

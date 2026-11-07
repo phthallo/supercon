@@ -81,12 +81,13 @@ class AppSwitcher:
                 ## Display current app from all installed apps
                 leds.menu_display(self.selection_idx, len(self.apps))
 
-                if MenuPlus.pressed():
+                # Menu + is the left button and Menu - the right, so + steps left along the LEDs.
+                if MenuMinus.pressed():
                     self.selection_idx = (self.selection_idx + 1) % len(self.apps)
                     print(
                         f"Selected app {self.selection_idx}: {self.apps[self.selection_idx].name}"
                     )
-                if MenuMinus.pressed():
+                if MenuPlus.pressed():
                     self.selection_idx = (self.selection_idx - 1) % len(self.apps)
                     print(
                         f"Selected app {self.selection_idx}: {self.apps[self.selection_idx].name}"

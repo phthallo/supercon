@@ -645,8 +645,8 @@ def _sdl(scancode):
 # the label shown for them. Names come from the firmware's Button objects.
 _BUTTONS = (
     ("UserA", (ord("a"),), "A"),
-    ("MenuMinus", (_sdl(80),), "Left"),
-    ("MenuPlus", (_sdl(79),), "Right"),
+    ("MenuPlus", (_sdl(80),), "Left"),
+    ("MenuMinus", (_sdl(79),), "Right"),
     ("UserB", (ord("b"),), "B"),
     ("Boot", (ord(" "),), "Space"),
 )

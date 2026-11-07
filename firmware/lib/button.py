@@ -6,9 +6,8 @@ import asyncio as aio
 import time
 from micropython import const
 
-## Note: plus/minus mislabeled on the silkscreen!
-MENU_MINUS_PIN = 40  # SW5  BUTTON_2  IO40
-MENU_PLUS_PIN = 15  # SW6  BUTTON_3  IO15
+MENU_PLUS_PIN = 40  # SW5  BUTTON_2  IO40
+MENU_MINUS_PIN = 15  # SW6  BUTTON_3  IO15
 USER_A_PIN = 39  # SW4  BUTTON_1  IO39
 USER_B_PIN = 16  # SW7  BUTTON_4  IO16
 BOOT_PIN = 0
