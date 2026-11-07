@@ -342,7 +342,7 @@ func TestPlayerOverHTTP(t *testing.T) {
 	if code, out := callAs(t, h, testBadgeKey, "POST", "/api/rhythm/runs", runJSON([4]int{20, 0, 0, 0}, 20, "")); code != 201 {
 		t.Fatalf("run = %d %v", code, out)
 	}
-	if st := next(); st.T != "result" || st.Grade != "S" || !strings.Contains(st.Claim, "/c/") {
+	if st := next(); st.T != "result" || st.Grade != "S" {
 		t.Fatalf("result event %+v, want the badge's run", st)
 	}
 }

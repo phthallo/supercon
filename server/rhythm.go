@@ -34,7 +34,7 @@ var demoSongsFS embed.FS
 
 const (
 	claimTTL      = time.Hour
-	maxListeners  = 8
+	maxListeners  = 500
 	maxAudioBytes = 20 << 20
 	maxSongBytes  = 1 << 20
 	maxNameRunes  = 16
@@ -71,7 +71,7 @@ type PlayerState struct {
 	Diff    string  `json:"diff,omitempty"`
 	StartAt float64 `json:"start_at,omitempty"` // server ms at which audio position 0 plays
 	PosMS   float64 `json:"pos_ms,omitempty"`
-	Claim   string  `json:"claim,omitempty"`
+	// No claim code: anyone can watch, so only the badge screen shows it.
 	Score   int     `json:"score,omitempty"`
 	Acc     float64 `json:"acc,omitempty"`
 	Grade   string  `json:"grade,omitempty"`
@@ -780,7 +780,7 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	claimURL := s.rhythm.baseURL + "/c/" + code
 	if s.rhythm.isBadge(r) {
 		s.rhythm.command(func(st *PlayerState) error {
-			*st = PlayerState{T: "result", Song: song.ID, Diff: body.Diff, Claim: claimURL, Score: want.Score, Acc: want.Acc, Grade: want.Grade}
+			*st = PlayerState{T: "result", Song: song.ID, Diff: body.Diff, Score: want.Score, Acc: want.Acc, Grade: want.Grade}
 			return nil
 		})
 	}

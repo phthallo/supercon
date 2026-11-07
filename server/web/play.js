@@ -182,6 +182,7 @@
     show("song-meta", active);
     show("progress", active && (st.t !== "result" || !!state.start_at));
     show("result", active && st.t === "result");
+    show("claim", active && st.t === "result");
     show("big", false);
     if (!active) {
       stopAudio();
@@ -207,7 +208,6 @@
         $("res-grade").className = `grade big g-${st.grade}`;
         $("res-score").textContent = st.score.toLocaleString("en-US");
         $("res-acc").textContent = `${(st.acc * 100).toFixed(2)}%`;
-        $("res-claim").href = new URL(st.claim).pathname;
         tick();
         break;
     }
@@ -234,6 +234,11 @@
     resync = setInterval(() => syncClock().catch(() => {}), 120000);
     listen();
   }
+
+  $("claim").addEventListener("submit", (e) => {
+    e.preventDefault();
+    location.href = `/c/${encodeURIComponent($("claim-code").value.trim().toUpperCase())}`;
+  });
 
   // Browsers only start audio after a click, so the player waits for one.
   $("sound").addEventListener("click", () => {
