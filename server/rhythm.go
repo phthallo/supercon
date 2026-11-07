@@ -326,7 +326,26 @@ func randomToken() string {
 
 // Scoring, as on the badge.
 
-var judgePoints = [4]int{300, 225, 150, 0}
+// osu!mania accuracy weights for perfect, great, good and miss.
+var judgePoints = [4]int{300, 200, 100, 0}
+
+// gradeFor follows osu!standard: the share of perfects sets the grade, and a miss caps it at A.
+func gradeFor(counts [4]int) string {
+	n := counts[0] + counts[1] + counts[2] + counts[3]
+	over := func(tenths int) bool { return counts[0]*10 > tenths*n }
+	clean := counts[3] == 0
+	switch {
+	case over(9) && clean && counts[2]*100 < n:
+		return "S"
+	case over(8) && clean || over(9):
+		return "A"
+	case over(7) && clean || over(8):
+		return "B"
+	case over(6):
+		return "C"
+	}
+	return "D"
+}
 
 type runScore struct {
 	Score int
@@ -358,17 +377,7 @@ func scoreRun(n int, counts [4]int, maxCombo int) (runScore, error) {
 		return runScore{}, fmt.Errorf("max_combo %d is impossible with %d hits and %d misses", maxCombo, hits, misses)
 	}
 	score := int(float64(900000*points)/float64(300*n) + float64(100000*maxCombo)/float64(n))
-	grade := "D"
-	for _, g := range []struct {
-		name string
-		pct  int
-	}{{"S", 95}, {"A", 90}, {"B", 80}, {"C", 70}} {
-		if points*100 >= g.pct*300*n {
-			grade = g.name
-			break
-		}
-	}
-	return runScore{Score: score, Acc: float64(points) / float64(300*n), Grade: grade}, nil
+	return runScore{Score: score, Acc: float64(points) / float64(300*n), Grade: gradeFor(counts)}, nil
 }
 
 // checkClaimed compares the badge's numbers with the server's.

@@ -24,11 +24,13 @@ func TestScoreRunMatchesBadge(t *testing.T) {
 		wantFail bool
 	}{
 		{n: 20, counts: [4]int{20, 0, 0, 0}, combo: 20, score: 1000000, acc: 1, grade: "S"},
-		// 5550 of 6000 points: 900000*5550/6000 + 100000*20/20 = 832500 + 100000
-		{n: 20, counts: [4]int{16, 2, 2, 0}, combo: 20, score: 932500, acc: 5550.0 / 6000, grade: "A"},
-		{n: 23, counts: [4]int{11, 6, 6, 0}, combo: 23, score: 823913, acc: 5550.0 / 6900, grade: "B"},
-		{n: 20, counts: [4]int{19, 0, 0, 1}, combo: 12, score: 915000, acc: 0.95, grade: "S"},
-		{n: 3, counts: [4]int{1, 1, 0, 1}, combo: 1, score: 558333, acc: 525.0 / 900, grade: "D"},
+		// 5400 of 6000 points: 900000*5400/6000 + 100000*20/20 = 810000 + 100000; 80% perfects is not over 80
+		{n: 20, counts: [4]int{16, 2, 2, 0}, combo: 20, score: 910000, acc: 0.9, grade: "B"},
+		{n: 23, counts: [4]int{11, 6, 6, 0}, combo: 23, score: 765217, acc: 5100.0 / 6900, grade: "D"},
+		{n: 20, counts: [4]int{19, 1, 0, 0}, combo: 20, score: 985000, acc: 5900.0 / 6000, grade: "S"},
+		{n: 20, counts: [4]int{19, 0, 1, 0}, combo: 20, score: 970000, acc: 5800.0 / 6000, grade: "A"}, // a good costs S
+		{n: 20, counts: [4]int{19, 0, 0, 1}, combo: 12, score: 915000, acc: 0.95, grade: "A"},          // a miss costs S
+		{n: 3, counts: [4]int{1, 1, 0, 1}, combo: 1, score: 533333, acc: 500.0 / 900, grade: "D"},
 		{n: 20, counts: [4]int{10, 0, 0, 0}, combo: 10, wantFail: true},  // counts short of the chart
 		{n: 20, counts: [4]int{20, 0, 0, 0}, combo: 19, wantFail: true},  // no misses, so combo is every note
 		{n: 20, counts: [4]int{18, 0, 0, 2}, combo: 19, wantFail: true},  // more combo than hits
@@ -240,7 +242,7 @@ func TestRunClaimFlow(t *testing.T) {
 		return out["code"].(string)
 	}
 	first := claim([4]int{16, 2, 2, 0}, 20)
-	if code, out := call(t, h, "GET", "/api/rhythm/claims/"+strings.ToLower(first), ""); code != 200 || out["grade"] != "A" || out["title"] != "T20" {
+	if code, out := call(t, h, "GET", "/api/rhythm/claims/"+strings.ToLower(first), ""); code != 200 || out["grade"] != "B" || out["title"] != "T20" {
 		t.Fatalf("GET claim = %d %v", code, out)
 	}
 	if code, _ := call(t, h, "POST", "/api/rhythm/claims/"+first, `{"name":"a<b>"}`); code != 400 {
@@ -263,7 +265,7 @@ func TestRunClaimFlow(t *testing.T) {
 	if code != 200 || len(runs) != 2 {
 		t.Fatalf("leaderboard = %d %v, want heidi and orpheus's best", code, out)
 	}
-	if top := runs[0].(map[string]any); top["name"] != "heidi" || runs[1].(map[string]any)["score"].(float64) != 932500 {
+	if top := runs[0].(map[string]any); top["name"] != "heidi" || runs[1].(map[string]any)["score"].(float64) != 910000 {
 		t.Fatalf("leaderboard order %v", runs)
 	}
 

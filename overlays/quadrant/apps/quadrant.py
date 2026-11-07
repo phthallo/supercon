@@ -32,7 +32,8 @@ LANES = ((96, 96, "+"), (864, 96, "-"), (96, 576, "A"), (864, 576, "B"))
 # Wide while there's no music to time against; tighten once the web player plays the audio.
 PERFECT_MS, GREAT_MS, GOOD_MS = 80, 150, 220
 JUDGE_NAMES = ("PERFECT", "GREAT", "GOOD", "MISS")
-JUDGE_POINTS = (300, 225, 150, 0)
+# osu!mania accuracy weights.
+JUDGE_POINTS = (300, 200, 100, 0)
 JUDGE_LEDS = ((0, 0, 8), (0, 6, 2), (6, 4, 0), (8, 0, 0))
 TRAVEL_FRAMES = 4
 # A delta frame shows on the panel 580-750 ms after update(), so each frame is sent this early.
@@ -46,10 +47,22 @@ SELECT, PLAY, PAUSE, RESULTS = 0, 1, 2, 3
 PAUSE_ITEMS = ("Resume", "Retry", "Song list")
 
 
-def grade_for(acc):
-    for g, floor in (("S", 0.95), ("A", 0.90), ("B", 0.80), ("C", 0.70)):
-        if acc >= floor:
-            return g
+def grade_for(counts):
+    """osu!standard grades: the share of perfects sets the grade, and a miss caps it at A."""
+    n = sum(counts)
+    clean = counts[3] == 0
+
+    def over(tenths):
+        return counts[0] * 10 > tenths * n
+
+    if over(9) and clean and counts[2] * 100 < n:
+        return "S"
+    if over(8) and clean or over(9):
+        return "A"
+    if over(7) and clean or over(8):
+        return "B"
+    if over(6):
+        return "C"
     return "D"
 
 
@@ -592,7 +605,7 @@ class Quadrant(BaseApp):
         score = r.score()
         key = "%s/%s" % (r.song["title"], r.diff)
         prev = self.best.get(key)
-        g = grade_for(acc)
+        g = grade_for(r.counts)
         new_best = prev is None or score > prev[0]
         if new_best:
             self.best[key] = [score, round(acc * 10000) / 100, g]
