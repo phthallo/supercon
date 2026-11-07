@@ -182,6 +182,8 @@ class Run:
         self.fresh = []
         beat = 60000 / song["bpm"]
         self.period = math.ceil(700 / beat) * beat
+        # Frames fall on the beat grid, which starts at offset_ms. The server places notes on these frames.
+        self.phase = (song.get("offset_ms") or 0) % self.period
         last = max(n[0] + n[2] for n in chart) if chart else 0
         self.end_ms = last + 2 * self.period
         self.duration = song.get("duration_ms") or self.end_ms
@@ -522,7 +524,7 @@ class Quadrant(BaseApp):
     def _clock(self, r, song_ms):
         """Set the clock so song time is song_ms - lead now, and the next frame is due at once."""
         r.t0_us = time.ticks_add(time.ticks_us(), int((self.lead - song_ms) * 1000))
-        r.next_frame = math.ceil(song_ms / r.period)
+        r.next_frame = math.ceil((song_ms - r.phase) / r.period)
 
     def _song_ms(self, r, us):
         return time.ticks_diff(us, r.t0_us) / 1000
@@ -548,7 +550,7 @@ class Quadrant(BaseApp):
             while not display.is_done_updating():
                 await aio.sleep_ms(20)
             display.red.fill(0)
-            self._draw_game(r, math.ceil(s0 / P) * P)
+            self._draw_game(r, r.phase + math.ceil((s0 - r.phase) / P) * P)
             display.request_clean()
             display.update()
             await aio.sleep_ms(50)
@@ -567,7 +569,7 @@ class Quadrant(BaseApp):
             else:
                 self._player("start", song=r.song["id"], diff=r.diff)
         while True:
-            T = r.next_frame * P
+            T = r.phase + r.next_frame * P
             if T > r.end_ms:
                 break
             due = time.ticks_add(r.t0_us, int((T - self.lead) * 1000))

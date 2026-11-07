@@ -21,21 +21,28 @@ const (
 	bmHop      = 128
 	bmMaxMS    = 10 * 60 * 1000
 	bmLeadInMS = 3000 // the first note needs time to travel down its track
+	// The badge redraws every whole number of beats at least this far apart,
+	// counted from the first beat. Notes start and end only on those redraws.
+	minRedrawMS = 700
 )
+
+// redrawBeats is how many beats pass between badge redraws, as the badge computes it.
+func redrawBeats(beat float64) int {
+	return int(math.Ceil(minRedrawMS / beat))
+}
 
 type beatSpec struct {
 	diff      string
-	perBeat   int     // grid slots per beat a note may start on
 	minGapMS  float64 // between any two notes
-	keep      float64 // fraction of grid slots, strongest first, that may become notes
+	keep      float64 // fraction of redraws, strongest first, that may become notes
 	chords    bool
 	holdBeats []int
 }
 
 var beatSpecs = []beatSpec{
-	{"easy", 1, 1500, 0.35, false, []int{2}},
-	{"normal", 1, 850, 0.45, true, []int{2, 3}},
-	{"hard", 1, 420, 0.6, true, []int{2, 3, 4}},
+	{"easy", 1500, 0.35, false, []int{2}},
+	{"normal", 850, 0.45, true, []int{2, 3}},
+	{"hard", 420, 0.6, true, []int{2, 3, 4}},
 }
 
 // onsets is the per-hop analysis of a track.
@@ -58,11 +65,12 @@ func GenerateSong(id, title, artist string, data []byte) (*Song, error) {
 	}
 	o := analyse(mono, rate)
 	bpm, phase := o.tempo()
-	beat := 60000 / bpm
 	s := &Song{ID: id, Title: title, Artist: artist, BPM: math.Round(bpm*100) / 100,
 		OffsetMS: int(math.Round(phase)), DurationMS: durMS, Charts: map[string][]Note{}}
+	// The rounded values, since those are what the badge times its redraws from.
+	beat := 60000 / s.BPM
 	for _, spec := range beatSpecs {
-		s.Charts[spec.diff] = o.chart(spec, beat, phase, float64(durMS))
+		s.Charts[spec.diff] = o.chart(spec, beat, float64(s.OffsetMS), float64(durMS))
 	}
 	s.countNotes()
 	return s, nil
@@ -278,7 +286,7 @@ type slot struct {
 }
 
 func (o *onsets) chart(spec beatSpec, beat, phase, durMS float64) []Note {
-	step := beat / float64(spec.perBeat)
+	step := beat * float64(redrawBeats(beat))
 	var slots []slot
 	for k := 0; ; k++ {
 		t := phase + float64(k)*step
@@ -288,11 +296,7 @@ func (o *onsets) chart(spec beatSpec, beat, phase, durMS float64) []Note {
 		if t < bmLeadInMS {
 			continue
 		}
-		w := 1.0
-		if k%spec.perBeat != 0 {
-			w = 0.7
-		}
-		slots = append(slots, slot{t, o.at(o.flux, t) * w, o.at(o.high, t) - o.at(o.low, t)})
+		slots = append(slots, slot{t, o.at(o.flux, t), o.at(o.high, t) - o.at(o.low, t)})
 	}
 	if len(slots) == 0 {
 		return []Note{}
@@ -390,15 +394,17 @@ func assignLanes(picked []slot, spec beatSpec, beat, chordFloor float64, o *onse
 			next = picked[i+1].t
 		}
 		for _, l := range lanes {
-			dur := 0
+			dur := 0.0
 			// The + and - lanes never hold together, since pressing both pauses the game.
 			if len(lanes) == 1 && i%3 == 2 && (l >= 2 || holdEnd[1-l] <= s.t) {
 				dur = holdLength(spec, s.t, next, beat, o, medRMS)
 			}
 			if dur > 0 {
-				notes = append(notes, Note{int(math.Round(s.t)), l, dur})
-				holdEnd[l] = s.t + float64(dur)
-				freeAt[l] = s.t + float64(dur) + beat
+				// Rounding the end, not the length, keeps the tail within 0.5 ms of its redraw.
+				start := int(math.Round(s.t))
+				notes = append(notes, Note{start, l, int(math.Round(s.t+dur)) - start})
+				holdEnd[l] = s.t + dur
+				freeAt[l] = s.t + dur + beat
 			} else {
 				notes = append(notes, Note{int(math.Round(s.t)), l})
 				freeAt[l] = s.t + min(2*beat, spec.minGapMS*2)
@@ -412,9 +418,11 @@ func assignLanes(picked []slot, spec beatSpec, beat, chordFloor float64, o *onse
 
 // holdLength turns a note into a hold over a gap with no other notes, as long
 // as the music keeps sounding through it.
-func holdLength(spec beatSpec, t, next, beat float64, o *onsets, medRMS float64) int {
+func holdLength(spec beatSpec, t, next, beat float64, o *onsets, medRMS float64) float64 {
+	n := redrawBeats(beat)
 	for k := len(spec.holdBeats) - 1; k >= 0; k-- {
-		d := float64(spec.holdBeats[k]) * beat
+		// Round up to whole redraws so the tail lands on a frame too.
+		d := float64((spec.holdBeats[k]+n-1)/n*n) * beat
 		if t+d+beat/2 > next {
 			continue
 		}
@@ -427,7 +435,7 @@ func holdLength(spec beatSpec, t, next, beat float64, o *onsets, medRMS float64)
 			}
 		}
 		if hops > 0 && quiet*4 < hops {
-			return int(math.Round(d))
+			return d
 		}
 	}
 	return 0
