@@ -1,7 +1,9 @@
 (() => {
   const statusEl = document.getElementById("status");
   const list = document.getElementById("networks");
-  const busyButtons = [document.getElementById("add-ink"), document.getElementById("save-wifi")];
+  const busyButtons = ["add-ink", "save-wifi", "load-wifi"].map((id) => document.getElementById(id));
+  // Networks removed from the list here, so a save drops them from the badge too.
+  const removed = new Set();
 
   function status(text, kind = "") {
     statusEl.textContent = text;
@@ -24,6 +26,8 @@
     row.querySelector("[name=ssid]").value = ssid;
     row.querySelector("[name=password]").value = password;
     row.querySelector("button").addEventListener("click", () => {
+      const ssid = row.querySelector("[name=ssid]").value.trim();
+      if (ssid) removed.add(ssid);
       row.remove();
       if (!list.children.length) addRow();
     });
@@ -48,27 +52,23 @@
   // ---- badge ----------------------------------------------------------------
   const enc = (s) => new TextEncoder().encode(s);
 
-  function configFiles() {
-    const nets = networks();
-    if (!nets.length) throw new Error("Add at least one wifi network first.");
-    const files = [["/data/wifi.json", enc(JSON.stringify({ networks: nets }))]];
-    // On a local test server, the badge keeps its default server.
-    if (!/^(localhost|127\.|\[::1\])/.test(location.hostname)) {
-      files.push(["/data/ink.json", enc(JSON.stringify({ server: location.origin, poll_s: 60 }))]);
+  // The networks saved on the badge. Older badges store a single {ssid, password}.
+  async function badgeNetworks(repl) {
+    const text = await repl.readText("/data/wifi.json");
+    if (!text) return [];
+    try {
+      const cfg = JSON.parse(text);
+      return (cfg.networks || [cfg]).filter((n) => n && n.ssid);
+    } catch (e) {
+      return [];
     }
-    return files;
   }
 
-  async function install(withApp) {
+  // Opens the badge's REPL, runs fn with it, and closes the port. Returns fn's result.
+  async function withBadge(fn) {
     let port, repl;
     busyButtons.forEach((b) => (b.disabled = true));
     try {
-      const files = configFiles();
-      if (withApp) {
-        const res = await fetch("/install/files/ink.py");
-        if (!res.ok) throw new Error("Couldn't download the app. Try again in a moment.");
-        files.unshift(["/apps/ink.py", new Uint8Array(await res.arrayBuffer())]);
-      }
       status("Pick your badge in the browser's list…");
       port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
       try {
@@ -79,12 +79,7 @@
       repl = new Repl(port.readable, port.writable);
       status("Connecting…");
       await repl.enter();
-      for (const [i, [path, bytes]] of files.entries()) {
-        status(`Writing ${path} (${i + 1} of ${files.length})…`);
-        await repl.writeFile(path, bytes);
-      }
-      await repl.reset();
-      status("Done! Your badge is restarting.", "ready");
+      return await fn(repl);
     } catch (e) {
       if (e.name === "NotFoundError") status("No badge picked.", "wait");
       else status(e.message || String(e), "wait");
@@ -95,6 +90,54 @@
     }
   }
 
+  async function install(withApp) {
+    const nets = networks();
+    if (!nets.length) {
+      status("Add at least one wifi network first.", "wait");
+      return;
+    }
+    let app;
+    if (withApp) {
+      const res = await fetch("/install/files/ink.py").catch(() => null);
+      if (!res || !res.ok) {
+        status("Couldn't download the app. Try again in a moment.", "wait");
+        return;
+      }
+      app = new Uint8Array(await res.arrayBuffer());
+    }
+    await withBadge(async (repl) => {
+      const listed = new Set(nets.map((n) => n.ssid));
+      const kept = (await badgeNetworks(repl)).filter((n) => !listed.has(n.ssid) && !removed.has(n.ssid));
+      const files = [["/data/wifi.json", enc(JSON.stringify({ networks: [...nets, ...kept] }))]];
+      // On a local test server, the badge keeps its default server.
+      if (!/^(localhost|127\.|\[::1\])/.test(location.hostname)) {
+        files.push(["/data/ink.json", enc(JSON.stringify({ server: location.origin, poll_s: 60 }))]);
+      }
+      if (app) files.unshift(["/apps/ink.py", app]);
+      for (const [i, [path, bytes]] of files.entries()) {
+        status(`Writing ${path} (${i + 1} of ${files.length})…`);
+        await repl.writeFile(path, bytes);
+      }
+      await repl.reset();
+      const also = kept.length ? ` Also kept ${kept.map((n) => n.ssid).join(", ")}, already on your badge.` : "";
+      status(`Done! Your badge is restarting.${also}`, "ready");
+    });
+  }
+
+  async function load() {
+    await withBadge(async (repl) => {
+      const saved = await badgeNetworks(repl);
+      const listed = new Set(networks().map((n) => n.ssid));
+      // Drop the empty starter row so loaded networks don't sit under a blank one.
+      [...list.children].forEach((row) => { if (!row.querySelector("[name=ssid]").value.trim()) row.remove(); });
+      const fresh = saved.filter((n) => !listed.has(n.ssid));
+      fresh.forEach((n) => { removed.delete(n.ssid); addRow(n.ssid, n.password); });
+      if (!list.children.length) addRow();
+      status(saved.length ? `Loaded ${saved.length} network${saved.length === 1 ? "" : "s"} from your badge.` : "No wifi saved on your badge yet.", "ready");
+    });
+  }
+
   document.getElementById("add-ink").addEventListener("click", () => install(true));
   document.getElementById("save-wifi").addEventListener("click", () => install(false));
+  document.getElementById("load-wifi").addEventListener("click", load);
 })();

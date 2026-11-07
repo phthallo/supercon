@@ -89,6 +89,16 @@ class Repl {
     }
   }
 
+  // Returns the file's text, or null when it doesn't exist.
+  async readText(path) {
+    const out = await this.exec(
+      `import binascii\ntry:\n with open(${JSON.stringify(path)},'rb') as _f: print(binascii.b2a_base64(_f.read()).decode().strip())\nexcept OSError:\n print('-')`,
+    );
+    const b64 = out.trim();
+    if (b64 === "-") return null;
+    return new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+  }
+
   // The connection drops as the badge restarts, so nothing is read back.
   async reset() {
     await this.write("import machine\nmachine.reset()\x04");
