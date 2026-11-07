@@ -11,7 +11,7 @@ from array import array
 
 from apps.base_app import BaseApp
 from lib import button
-from lib.button import MenuMinus, MenuPlus
+from lib.button import MenuMinus, MenuPlus, UserA, UserB
 from lib.epd import display
 from lib.led_bar import leds
 from lib.qfont import CENTER, RIGHT, Font
@@ -38,6 +38,9 @@ TRAVEL_FRAMES = 4
 # A delta frame shows on the panel 580-750 ms after update(), so each frame is sent this early.
 LEAD_MS = 594
 PAUSE_HOLD_MS = 150
+# A hold counts if the button is let go no earlier than this before its end.
+HOLD_RELEASE_MS = 150
+LANE_BUTTONS = (MenuPlus, MenuMinus, UserA, UserB)
 
 SELECT, PLAY, PAUSE, RESULTS = 0, 1, 2, 3
 PAUSE_ITEMS = ("Resume", "Retry", "Song list")
@@ -150,8 +153,11 @@ class Run:
         self.notes = chart
         self.judged = bytearray(len(chart))
         self.lane_notes = [[], [], [], []]
-        for i, (_, lane) in enumerate(chart):
-            self.lane_notes[lane].append(i)
+        for i, n in enumerate(chart):
+            self.lane_notes[n[1]].append(i)
+        # A hold note is judged twice: head and tail.
+        self.total = len(chart) + sum(1 for n in chart if n[2])
+        self.holding = [-1, -1, -1, -1]
         self.lane_ptr = [0, 0, 0, 0]
         self.draw_lo = 0
         self.counts = [0, 0, 0, 0]
@@ -163,7 +169,7 @@ class Run:
         self.fresh = []
         beat = 60000 / song["bpm"]
         self.period = math.ceil(700 / beat) * beat
-        last = chart[-1][0] if chart else 0
+        last = max(n[0] + n[2] for n in chart) if chart else 0
         self.end_ms = last + 2 * self.period
         self.duration = song.get("duration_ms") or self.end_ms
         self.t0_us = 0
@@ -177,7 +183,7 @@ class Run:
         self.frame_open = False
 
     def score(self):
-        n = len(self.notes) or 1
+        n = self.total or 1
         return int(900000 * self.points / (300 * n) + 100000 * self.max_combo / n)
 
     def accuracy(self):
@@ -378,12 +384,13 @@ class Quadrant(BaseApp):
         gc.collect()
         if song.get("calib"):
             # One note per frame, clockwise round the corners.
-            chart = [(2400 + k * 1200, (0, 1, 3, 2)[k % 4]) for k in range(CALIB_NOTES)]
+            chart = [(2400 + k * 1200, (0, 1, 3, 2)[k % 4], 0) for k in range(CALIB_NOTES)]
         else:
             with open(song["path"]) as f:
                 chart = json.load(f)["charts"].get(diff, [])
             gc.collect()
-            chart = [(int(h), int(l)) for h, l in chart if 0 <= l <= 3]
+            # Entries are [ms, lane] for a tap or [ms, lane, dur_ms] for a hold.
+            chart = [(int(n[0]), int(n[1]), int(n[2]) if len(n) > 2 else 0) for n in chart if 0 <= n[1] <= 3]
             chart.sort()
         self.game = Run(song, diff, chart)
         self._build_bg(self.game)
@@ -470,7 +477,23 @@ class Quadrant(BaseApp):
                     self._judge(r, idx[ptr], 3, 0)
                 ptr += 1
             r.lane_ptr[lane] = ptr
-        return MenuPlus.pressed_ms() >= PAUSE_HOLD_MS and MenuMinus.pressed_ms() >= PAUSE_HOLD_MS
+            i = r.holding[lane]
+            if i >= 0:
+                end = notes[i][0] + notes[i][2]
+                if now >= end:
+                    self._end_hold(r, lane, 0)
+                elif not self._held(lane):
+                    self._end_hold(r, lane, 0 if now >= end - HOLD_RELEASE_MS else 3)
+        # A hold on + or - can't double as the pause chord.
+        return (r.holding[0] < 0 and r.holding[1] < 0
+                and MenuPlus.pressed_ms() >= PAUSE_HOLD_MS and MenuMinus.pressed_ms() >= PAUSE_HOLD_MS)
+
+    def _held(self, lane):
+        return LANE_BUTTONS[lane].pin.value()
+
+    def _end_hold(self, r, lane, kind):
+        r.holding[lane] = -1
+        self._score(r, lane, kind, None)
 
     def _hit(self, r, lane, t):
         idx = r.lane_notes[lane]
@@ -495,6 +518,16 @@ class Quadrant(BaseApp):
 
     def _judge(self, r, i, kind, off):
         r.judged[i] = kind + 1
+        _, lane, dur = r.notes[i]
+        self._score(r, lane, kind, off if kind < 3 else None)
+        if dur:
+            if kind == 3:
+                self._score(r, lane, 3, None)
+            else:
+                r.holding[lane] = i
+
+    def _score(self, r, lane, kind, off):
+        """Count one judgment. off is None for misses and hold tails, which have no timing."""
         r.counts[kind] += 1
         r.points += JUDGE_POINTS[kind]
         if kind == 3:
@@ -502,16 +535,20 @@ class Quadrant(BaseApp):
         else:
             r.combo += 1
             r.max_combo = max(r.max_combo, r.combo)
+        if off is not None:
             r.offsets.append(off)
             r.recent.append(off)
             if len(r.recent) > 6:
                 r.recent.pop(0)
-        r.fresh.append((r.notes[i][1], kind, off))
+        r.fresh.append((lane, kind, off or 0))
         leds.fill(JUDGE_LEDS[kind])
 
     def _pause(self, r):
         r.paused_ms = self._song_ms(r, time.ticks_us())
         r.frame_open = False
+        for lane in range(4):
+            if r.holding[lane] >= 0:
+                self._end_hold(r, lane, 3)
         # The menu opens after a further 500 ms hold, so a hold to pause doesn't also leave the app.
         now = time.ticks_ms()
         MenuPlus._press_onset_ms = now
@@ -644,6 +681,16 @@ class Quadrant(BaseApp):
             ring(fb, x, y, 44, 2)
             self._glyph(fb, i, 1)
 
+    def _hold_body(self, fb, lane, f_head, f_tail):
+        if f_head - f_tail < 0.01:
+            return
+        x1, y1 = self.G.point(lane, f_head)
+        x2, y2 = self.G.point(lane, f_tail)
+        quad(fb, x1, y1, x2, y2, 14, 1)
+        quad(fb, x1, y1, x2, y2, 8, 0)
+        rad = int(8 + 10 * f_tail)
+        fb.ellipse(int(x2), int(y2), rad, rad, 1, True)
+
     def _draw_game(self, r, T):
         fb, F, G = display.black, self.F, self.G
         fb.blit(self._bg, 0, 0)
@@ -651,12 +698,20 @@ class Quadrant(BaseApp):
         notes, judged = r.notes, r.judged
         while r.draw_lo < len(notes) and notes[r.draw_lo][0] < T - GOOD_MS:
             r.draw_lo += 1
+        for lane in range(4):
+            i = r.holding[lane]
+            if i >= 0:
+                h, _, dur = notes[i]
+                self._hold_body(fb, lane, 1.0, max(0.0, 1 - (h + dur - T) / travel))
+                self._receptor(fb, lane, True)
         visible = []
         j = r.draw_lo
         while j < len(notes) and notes[j][0] <= T + travel:
             if not judged[j]:
-                h, lane = notes[j]
+                h, lane, dur = notes[j]
                 f = min(1.0, 1 - (h - T) / travel)
+                if dur:
+                    self._hold_body(fb, lane, f, max(0.0, 1 - (h + dur - T) / travel))
                 x, y = G.point(lane, f)
                 visible.append((h, int(x), int(y), int(12 + 22 * f)))
             j += 1
@@ -848,7 +903,7 @@ class Quadrant(BaseApp):
             self._draw_calib_results()
             return
         score, acc, g, new_best, prev = self.result
-        n = len(r.notes) or 1
+        n = r.total or 1
         fb.fill(0)
         display.red.fill(0)
         gx, gy = 220, 300
