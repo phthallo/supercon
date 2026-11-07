@@ -32,7 +32,7 @@ LANES = ((96, 96, "+"), (864, 96, "-"), (96, 576, "A"), (864, 576, "B"))
 # Wide while there's no music to time against; tighten once the web player plays the audio.
 PERFECT_MS, GREAT_MS, GOOD_MS = 80, 150, 220
 JUDGE_NAMES = ("PERFECT", "GREAT", "GOOD", "MISS")
-JUDGE_POINTS = (300, 100, 50, 0)
+JUDGE_POINTS = (300, 225, 150, 0)
 JUDGE_LEDS = ((0, 0, 8), (0, 6, 2), (6, 4, 0), (8, 0, 0))
 TRAVEL_FRAMES = 4
 # A delta frame shows on the panel 580-750 ms after update(), so each frame is sent this early.

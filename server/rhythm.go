@@ -326,7 +326,7 @@ func randomToken() string {
 
 // Scoring, as on the badge.
 
-var judgePoints = [4]int{300, 100, 50, 0}
+var judgePoints = [4]int{300, 225, 150, 0}
 
 type runScore struct {
 	Score int
