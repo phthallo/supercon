@@ -4,7 +4,9 @@ This file is installed on its own onto stock badges, so it only imports modules 
 """
 
 import gc
+import io
 import json
+import os
 import time
 
 import deflate
@@ -19,6 +21,8 @@ from lib.led_bar import leds
 _CONFIG = "/data/ink.json"
 # {"networks": [{"ssid": "...", "password": "..."}]}, or a single {"ssid": "...", "password": "..."}
 _WIFI = "/data/wifi.json"
+# The last frame as the server sent it (zlib, about 15 KB), shown at launch so the app works offline.
+_CACHE = "/data/ink_frame.bin"
 _RETRY_S = 20
 _JOIN_MS = 15000
 
@@ -56,6 +60,13 @@ def _connect():
     raise OSError("wifi: could not join " + ", ".join(n["ssid"] for n in candidates))
 
 
+def _draw(frame):
+    """Unpack a zlib frame into the display buffers."""
+    with deflate.DeflateIO(io.BytesIO(frame), deflate.ZLIB) as z:
+        _read_exact(z, display._framebuffer_black)
+        _read_exact(z, display._framebuffer_red)
+
+
 def _read_exact(stream, buf):
     view = memoryview(buf)
     pos = 0
@@ -90,6 +101,8 @@ class InkApp(BaseApp):
         self._next = 0
 
     def run(self):
+        if self.launched:
+            self._show_cached()
         if self.launched or UserA.pressed():
             # Another app may have drawn over the screen, so fetch even if unchanged.
             self._etag = None
@@ -121,10 +134,28 @@ class InkApp(BaseApp):
                 return False
             if r.status_code != 200:
                 raise OSError(f"http {r.status_code}")
-            with deflate.DeflateIO(r.raw, deflate.ZLIB) as z:
-                _read_exact(z, display._framebuffer_black)
-                _read_exact(z, display._framebuffer_red)
-            self._etag = _header(r.headers, "ETag")
+            frame = r.content
+            etag = _header(r.headers, "ETag")
         finally:
             r.close()
+        _draw(frame)
+        self._etag = etag
+        try:
+            with open(_CACHE + ".tmp", "wb") as f:
+                f.write(frame)
+            os.rename(_CACHE + ".tmp", _CACHE)
+        except OSError as ex:
+            print(f"ink: cache not saved: {ex}")
         return True
+
+    def _show_cached(self):
+        """Draw the last saved frame, if any, while the first fetch runs."""
+        try:
+            with open(_CACHE, "rb") as f:
+                frame = f.read()
+            _draw(frame)
+        except Exception as ex:
+            # No cache yet, or a damaged one: the fetch draws over it either way.
+            print(f"ink: no cached frame: {ex}")
+            return
+        display.update()
