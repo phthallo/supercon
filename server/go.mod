@@ -7,6 +7,7 @@ require (
 	github.com/jackc/pgx/v5 v5.12.0
 	golang.org/x/image v0.45.0
 	modernc.org/sqlite v1.55.0
+	rsc.io/qr v0.2.0
 )
 
 require (

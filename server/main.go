@@ -33,6 +33,11 @@ func main() {
 	}
 	defer store.Close()
 
+	rhythm, err := OpenRhythm(store.db, env("QUADRANT_URL", "https://quadrant.underwhelm.ing"))
+	if err != nil {
+		log.Fatalf("open quadrant: %v", err)
+	}
+
 	admin := os.Getenv("ADMIN_PASSWORD")
 	if admin == "" {
 		log.Print("ADMIN_PASSWORD is empty; /admin is disabled")
@@ -41,6 +46,7 @@ func main() {
 		store:         store,
 		limiter:       NewLimiter(cooldown),
 		hub:           NewHub(),
+		rhythm:        rhythm,
 		adminPassword: admin,
 		ipHeader:      env("TRUSTED_PROXY_HEADER", ""),
 		wifiSSID:      os.Getenv("WIFI_SSID"),

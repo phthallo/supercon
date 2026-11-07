@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claim | Quadrant</title>
+  <script>try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="primary">
+  <header>
+    <div class="navbox">
+      <div class="row">
+        <span class="crumbs">/ <a href="/">quadrant</a> / claim</span>
+        <button class="link" id="theme" type="button">[ light ]</button>
+      </div>
+      <hr>
+      <nav>
+        <a href="/">[ scores ]</a>
+        <a href="/play">[ play ]</a>
+      </nav>
+    </div>
+    <h1>quadrant.</h1>
+  </header>
+
+  <main>
+    <p id="load-error" class="error" role="alert" hidden></p>
+    <section id="run" class="box stage-box" hidden>
+      <h2 id="title"></h2>
+      <p id="diff" class="muted"></p>
+      <div class="result">
+        <span id="grade" class="grade big"></span>
+        <div>
+          <div id="score" class="res-score"></div>
+          <div id="acc" class="muted"></div>
+        </div>
+      </div>
+      <table class="board counts">
+        <thead><tr><th>perfect</th><th>great</th><th>good</th><th>miss</th><th>combo</th></tr></thead>
+        <tbody><tr id="counts"></tr></tbody>
+      </table>
+
+      <form id="claim" class="claim" autocomplete="on" hidden>
+        <label for="name">Name</label>
+        <div class="join-row">
+          <input id="name" class="text-input" maxlength="16" autocomplete="nickname" required>
+          <button class="link" type="submit">[ save ]</button>
+        </div>
+        <p id="claim-error" class="error" role="alert"></p>
+      </form>
+      <p id="claimed" hidden></p>
+    </section>
+  </main>
+
+  <footer><a href="https://phthallo.com">phthallo</a></footer>
+</div>
+<script src="/static/theme.js"></script>
+<script src="/static/claim.js"></script>
+</body>
+</html>

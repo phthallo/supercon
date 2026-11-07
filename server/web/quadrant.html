@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quadrant</title>
+  <meta name="description" content="a rhythm game on an e-paper badge">
+  <script>try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="primary">
+  <header>
+    <div class="navbox">
+      <div class="row">
+        <span class="crumbs">/ <a href="/">quadrant</a></span>
+        <button class="link" id="theme" type="button">[ light ]</button>
+      </div>
+      <hr>
+      <nav>
+        <a href="/" aria-current="page">[ scores ]</a>
+        <a href="/play">[ play ]</a>
+      </nav>
+    </div>
+    <h1>quadrant.</h1>
+  </header>
+
+  <main>
+    <p>A rhythm game on my Supercon badge! Open <a href="/play">play</a> on your phone or laptop to hear the music :]</p>
+
+    <div class="q-grid">
+      <ul class="songs" id="songs" aria-label="songs"></ul>
+      <section aria-labelledby="board-title">
+        <div class="board-head">
+          <h2 id="board-title"></h2>
+          <div class="diffs" id="diffs"></div>
+        </div>
+        <div class="table-scroll">
+          <table class="board">
+            <thead class="board-cols"><tr><th>#</th><th>name</th><th>score</th><th>acc</th><th>grade</th><th>combo</th></tr></thead>
+            <tbody id="board"></tbody>
+          </table>
+        </div>
+        <p id="board-empty" class="muted" hidden>No scores yet.</p>
+        <p id="board-error" class="error" hidden></p>
+      </section>
+    </div>
+  </main>
+
+  <footer><a href="https://phthallo.com">phthallo</a></footer>
+</div>
+<script src="/static/theme.js"></script>
+<script src="/static/quadrant.js"></script>
+</body>
+</html>

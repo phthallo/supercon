@@ -37,6 +37,7 @@ type Server struct {
 	store         *Store
 	limiter       *Limiter
 	hub           *Hub
+	rhythm        *Rhythm
 	adminPassword string
 	ipHeader      string
 	// Prefilled on /install. Public: anyone can read it from the page.
@@ -78,7 +79,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /badge/frame.png", s.handleFramePNG)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
 
-	return sameOrigin(s.blockBanned(mux))
+	if s.rhythm == nil {
+		return sameOrigin(s.blockBanned(mux))
+	}
+	s.rhythmAPI(mux)
+	return sameOrigin(s.blockBanned(s.byHost(mux, s.quadrantRoutes(web))))
 }
 
 // blockBanned refuses banned IPs everywhere except admin (and the static files

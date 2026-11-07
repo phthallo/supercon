@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play | Quadrant</title>
+  <meta name="description" content="plays the music for a Quadrant run on the badge">
+  <script>try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="primary">
+  <header>
+    <div class="navbox">
+      <div class="row">
+        <span class="crumbs">/ <a href="/">quadrant</a> / <a href="/play">play</a></span>
+        <button class="link" id="theme" type="button">[ light ]</button>
+      </div>
+      <hr>
+      <nav>
+        <a href="/">[ scores ]</a>
+        <a href="/play" aria-current="page">[ play ]</a>
+      </nav>
+    </div>
+    <h1>quadrant.</h1>
+  </header>
+
+  <main>
+    <form id="join" class="box join" autocomplete="off">
+      <label for="code">Room code</label>
+      <div class="join-row">
+        <input id="code" class="code-input" maxlength="4" spellcheck="false" autocapitalize="characters" required>
+        <button class="link" type="submit">[ join ]</button>
+      </div>
+      <p id="join-error" class="error" role="alert"></p>
+    </form>
+
+    <section id="room" class="box stage-box" hidden>
+      <div class="room-head">
+        <span>Room <b id="room-code"></b></span>
+        <button class="link" id="leave" type="button">[ leave ]</button>
+      </div>
+      <h2 id="song-title">Waiting for the badge</h2>
+      <p id="song-meta" class="muted" hidden></p>
+      <div id="big" class="big" aria-live="polite" hidden></div>
+      <div id="progress" hidden>
+        <div class="progress"><div id="bar"></div></div>
+        <div class="times"><span id="elapsed">0:00</span><span id="total">0:00</span></div>
+      </div>
+      <div id="result" class="result" hidden>
+        <span id="res-grade" class="grade big"></span>
+        <div>
+          <div id="res-score" class="res-score"></div>
+          <div id="res-acc" class="muted"></div>
+          <a id="res-claim" href="/">[ claim this run ]</a>
+        </div>
+      </div>
+      <p id="room-error" class="error" role="alert"></p>
+    </section>
+
+    <section class="box calib" aria-labelledby="calib-title">
+      <h2 id="calib-title">Offset</h2>
+      <div class="calib-row">
+        <label class="offset"><input id="offset" type="number" step="1" value="0" aria-label="audio offset in ms"> ms</label>
+        <button class="link" id="tap-start" type="button">[ tap test ]</button>
+      </div>
+      <button id="tap" class="tap" type="button" hidden>Tap</button>
+      <p id="tap-status" class="muted" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <footer><a href="https://phthallo.com">phthallo</a></footer>
+</div>
+<script src="/static/theme.js"></script>
+<script src="/static/play.js"></script>
+</body>
+</html>
