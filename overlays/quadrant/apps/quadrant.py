@@ -204,6 +204,28 @@ class Run:
         return self.points / (300 * judged) if judged else 1.0
 
 
+def qr(fb, rows, x, y, size):
+    """Draw a QR code from rows of "0"/"1", with its 4-module quiet zone, as large as fits in size."""
+    n = len(rows) + 8
+    s = size // n
+    x += (size - s * n) // 2
+    y += (size - s * n) // 2
+    fb.fill_rect(x, y, s * n, s * n, 0)
+    x += 4 * s
+    y += 4 * s
+    for j, row in enumerate(rows):
+        i = 0
+        while i < len(row):
+            if row[i] == "1":
+                k = i
+                while k < len(row) and row[k] == "1":
+                    k += 1
+                fb.fill_rect(x + i * s, y + j * s, (k - i) * s, s, 1)
+                i = k
+            else:
+                i += 1
+
+
 def top_bar(fb, F, left, right=None):
     fb.fill_rect(0, 0, W, 56, 1)
     F["title"].draw(fb, left, 22, 29, 0)
@@ -271,6 +293,11 @@ class Quadrant(BaseApp):
         self._bg = None
         self._shown = None
         self.lead = LEAD_MS
+        self.server = None
+        self.net = None
+        self.net_err = None
+        self.net_retry = 0
+        self.claim = None
 
     def _launch(self):
         if self.F is None:
@@ -288,6 +315,7 @@ class Quadrant(BaseApp):
                 song = json.load(f)
             charts = song.pop("charts")
             song["path"] = path
+            song["id"] = n[:-5]
             song["counts"] = {d: len(charts.get(d, ())) for d in DIFFS}
             self.songs.append(song)
             del charts
@@ -302,9 +330,16 @@ class Quadrant(BaseApp):
             self.best = {}
         try:
             with open(CFG_PATH) as f:
-                self.lead = int(json.load(f)["lead_ms"])
-        except (OSError, ValueError, KeyError, TypeError):
+                cfg = json.load(f)
+        except (OSError, ValueError):
+            cfg = {}
+        try:
+            self.lead = int(cfg["lead_ms"])
+        except (KeyError, TypeError, ValueError):
             self.lead = LEAD_MS
+        # {"server": "https://quadrant.underwhelm.ing"} turns on the web player room.
+        self.server = cfg.get("server")
+        self.net_retry = time.ticks_ms()
         self.sel = min(self.sel, max(0, len(self.songs) - 1))
         self.state = SELECT
         self.game = None
@@ -340,7 +375,40 @@ class Quadrant(BaseApp):
             elif self.state == RESULTS:
                 self._draw_results()
             display.update()
+        elif self.state == SELECT and not self.dirty and display.is_done_updating():
+            self._open_room()
         await aio.sleep_ms(20)
+
+    def _open_room(self):
+        """Join wifi and open a room once the song list is showing. Blocks for up to about 20 s."""
+        if not self.server or self.net or time.ticks_diff(time.ticks_ms(), self.net_retry) < 0:
+            return
+        try:
+            from lib import qnet
+
+            link = qnet.Link(self.server)
+            link.open()
+            self.net, self.net_err = link, None
+        except Exception as e:
+            print("quadrant: offline", e)
+            self.net_err = "OFFLINE"
+            self.net_retry = time.ticks_add(time.ticks_ms(), 120000)
+        self.dirty = True
+
+    def _room(self, action, **body):
+        """Send a room command. Never raises, since the game plays on without the web player."""
+        if not self.net or self.game.song.get("calib"):
+            return
+        try:
+            if action in ("start", "resume"):
+                # Server time at which song position 0 plays, from the game clock's origin.
+                body["start_at"] = self.net.now() + time.ticks_diff(self.game.t0_us, time.ticks_us()) // 1000
+            self.net.command(action, **body)
+        except Exception as e:
+            print("quadrant: room", action, e)
+            if str(e).startswith("404"):
+                # The room expired; open a new one on the next visit to the song list.
+                self.net = None
 
     def _on_press(self, b):
         if self.state == SELECT:
@@ -367,6 +435,7 @@ class Quadrant(BaseApp):
                 elif self.pause_sel == 1:
                     self._start(self.game.song, self.game.diff)
                 else:
+                    self._room("stop")
                     self.state = SELECT
                     self.game = None
                 return
@@ -387,8 +456,11 @@ class Quadrant(BaseApp):
     def _save_lead(self, lead):
         self.lead = lead
         try:
+            cfg = {"lead_ms": lead}
+            if self.server:
+                cfg["server"] = self.server
             with open(CFG_PATH, "w") as f:
-                json.dump({"lead_ms": lead}, f)
+                json.dump(cfg, f)
         except OSError as e:
             print("quadrant: lead not saved", e)
 
@@ -422,11 +494,15 @@ class Quadrant(BaseApp):
         P = r.period
         display.session_max_frames = 1000
         if not r.started or r.resuming:
-            if r.started:
+            resume = r.started
+            if resume:
                 s0 = r.paused_ms - 2 * P
             else:
                 first = r.notes[0][0] if r.notes else 0
                 s0 = min(0, first - TRAVEL_FRAMES * P) - P
+                if self.net and not r.song.get("calib"):
+                    # Gives the web player time to fetch and decode the audio.
+                    s0 = min(s0, -3000)
             r.started = True
             r.resuming = False
             self._shown = PLAY
@@ -441,7 +517,17 @@ class Quadrant(BaseApp):
             while not display.is_done_updating():
                 await aio.sleep_ms(20)
             button.clear_presses()
+            if self.net and not r.song.get("calib"):
+                try:
+                    # The badge clock drifts from the server's by up to ~0.1 s in half an hour.
+                    self.net.sync()
+                except Exception as e:
+                    print("quadrant: sync", e)
             self._clock(r, s0)
+            if resume:
+                self._room("resume")
+            else:
+                self._room("start", song=r.song["id"], diff=r.diff)
         while True:
             T = r.next_frame * P
             if T > r.end_ms:
@@ -572,6 +658,7 @@ class Quadrant(BaseApp):
         self.pause_sel = 0
         self.state = PAUSE
         self.dirty = True
+        self._room("pause", pos_ms=max(1, int(r.paused_ms)))
 
     def _resume(self):
         self.game.resuming = True
@@ -616,8 +703,19 @@ class Quadrant(BaseApp):
                 print("quadrant: best not saved", e)
         self._write_log(r)
         self.result = (score, acc, g, new_best, prev)
+        self.claim = self._submit(r, score, acc, g) if self.net else None
         self.state = RESULTS
         self.dirty = True
+
+    def _submit(self, r, score, acc, g):
+        """Upload the run. Returns the server's claim (code, url, qr) or an error string."""
+        gc.collect()
+        try:
+            return self.net.submit({"song": r.song["id"], "diff": r.diff, "score": score, "acc": acc, "grade": g,
+                                    "counts": r.counts, "max_combo": r.max_combo, "notes": r.total})
+        except Exception as e:
+            print("quadrant: run not uploaded", e)
+            return "NOT UPLOADED"
 
     def _write_log(self, r):
         try:
@@ -771,7 +869,12 @@ class Quadrant(BaseApp):
         fb, F = display.black, self.F
         fb.fill(0)
         display.red.fill(0)
-        top_bar(fb, F, "QUADRANT")
+        room = None
+        if self.net:
+            room = "%s/play   ROOM %s" % (self.net.host, self.net.code)
+        elif self.server:
+            room = self.net_err or "CONNECTING"
+        top_bar(fb, F, "QUADRANT", room)
         hint = [(("-", "+"), "browse"), (("A",), "play"), (("B",), "difficulty")]
         if not self.songs:
             F["body"].draw(fb, "No songs in " + DATA + "/songs", CX, CY, 1, CENTER)
@@ -960,11 +1063,18 @@ class Quadrant(BaseApp):
 
         frame_rect(fb, 466, 400, 470, 206, 2)
         F["small"].draw(fb, "TIMING", 482, 420, 1, 0, 2)
+        claim = self.claim if isinstance(self.claim, dict) else None
+        if claim and claim.get("qr"):
+            hist_w = 245
+            qr(fb, claim["qr"], 734, 402, 200)
+        else:
+            hist_w = 445
+        right = 475 + hist_w
         if r.offsets:
             avg = sum(r.offsets) / len(r.offsets)
-            F["small"].draw(fb, "avg %+d ms" % round(avg), 920, 420, 1, RIGHT)
+            F["small"].draw(fb, "avg %+d ms" % round(avg), right, 420, 1, RIGHT)
         nb = 2 * GOOD_MS // 10 + 1
-        bw = 445 // nb
+        bw = hist_w // nb
         bins = [0] * nb
         for off in r.offsets:
             bins[max(0, min(nb - 1, (off + GOOD_MS) // 10))] += 1
@@ -979,5 +1089,10 @@ class Quadrant(BaseApp):
         for yy in range(450, 594, 10):
             fb.vline(481 + nb * bw // 2, yy, 5, 1)
         F["small"].draw(fb, "early", 482, 442)
-        F["small"].draw(fb, "late", 920, 442, 1, RIGHT)
-        hint_bar(fb, F, [(("B",), "song list"), (("+",), "retry")])
+        F["small"].draw(fb, "late", right, 442, 1, RIGHT)
+        note = None
+        if claim:
+            note = "scan to save   " + claim["code"]
+        elif self.claim:
+            note = self.claim
+        hint_bar(fb, F, [(("B",), "song list"), (("+",), "retry")], note)

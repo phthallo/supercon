@@ -655,7 +655,8 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 func (s *Server) handleRhythmTime(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	sendJSON(w, http.StatusOK, map[string]float64{"t": s.rhythm.serverMS()})
+	// Whole ms: the badge parses JSON numbers with a fraction as 32-bit floats.
+	sendJSON(w, http.StatusOK, map[string]int64{"t": int64(s.rhythm.serverMS())})
 }
 
 func (s *Server) handleSongs(w http.ResponseWriter, r *http.Request) {
