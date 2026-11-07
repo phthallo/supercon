@@ -34,8 +34,8 @@ type beatSpec struct {
 
 var beatSpecs = []beatSpec{
 	{"easy", 1, 1500, 0.35, false, []int{2}},
-	{"normal", 2, 850, 0.45, true, []int{2, 3}},
-	{"hard", 2, 420, 0.6, true, []int{2, 3, 4}},
+	{"normal", 1, 850, 0.45, true, []int{2, 3}},
+	{"hard", 1, 420, 0.6, true, []int{2, 3, 4}},
 }
 
 // onsets is the per-hop analysis of a track.
