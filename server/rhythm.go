@@ -1062,9 +1062,6 @@ func (s *Server) handleUploadSong(w http.ResponseWriter, r *http.Request) {
 		return data, err
 	}
 	songJSON, err := readPart("song", maxSongBytes)
-	if err == nil && songJSON == nil {
-		err = errors.New("song file is missing")
-	}
 	if err != nil {
 		sendError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1081,13 +1078,33 @@ func (s *Server) handleUploadSong(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	id := strings.TrimSpace(r.FormValue("id"))
-	if id == "" {
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" && songJSON != nil {
 		var t struct{ Title string }
 		json.Unmarshal(songJSON, &t)
-		id = slugify(t.Title)
+		title = t.Title
 	}
-	song, err := parseSong(id, songJSON)
+	id := strings.TrimSpace(r.FormValue("id"))
+	if id == "" {
+		id = slugify(title)
+	}
+	var song *Song
+	switch {
+	case songJSON != nil:
+		song, err = parseSong(id, songJSON)
+	case typ != "audio/mpeg":
+		err = errors.New("upload a song JSON, or an mp3 to generate charts from")
+	case title == "":
+		err = errors.New("title is required to generate charts")
+	default:
+		song, err = GenerateSong(id, title, strings.TrimSpace(r.FormValue("artist")), audio)
+		if err == nil {
+			// Round-trip through the file format so generated charts pass the same checks as uploads.
+			data, _ := json.Marshal(map[string]any{"title": song.Title, "artist": song.Artist, "bpm": song.BPM,
+				"offset_ms": song.OffsetMS, "duration_ms": song.DurationMS, "charts": song.Charts})
+			song, err = parseSong(id, data)
+		}
+	}
 	if err != nil {
 		sendError(w, http.StatusBadRequest, err.Error())
 		return

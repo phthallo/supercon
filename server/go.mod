@@ -4,6 +4,7 @@ go 1.25.10
 
 require (
 	github.com/coder/websocket v1.8.15
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jackc/pgx/v5 v5.12.0
 	golang.org/x/image v0.45.0
 	modernc.org/sqlite v1.55.0

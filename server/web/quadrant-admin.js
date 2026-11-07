@@ -41,8 +41,13 @@
   $("upload").addEventListener("submit", async (e) => {
     e.preventDefault();
     $("upload-msg").textContent = "";
+    const submit = e.target.querySelector("button[type=submit]");
+    submit.disabled = true;
+    submit.textContent = "[ uploading ]";
     const res = await fetch("/api/admin/rhythm/songs", { method: "POST", body: new FormData(e.target) }).catch(() => null);
     const body = res ? await res.json().catch(() => ({})) : {};
+    submit.disabled = false;
+    submit.textContent = "[ upload ]";
     if (!res || !res.ok) {
       $("upload-msg").textContent = body.error || "Upload failed.";
       return;

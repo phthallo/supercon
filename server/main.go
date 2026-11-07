@@ -19,6 +19,10 @@ func env(key, fallback string) string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "beatmap" {
+		beatmapCmd(os.Args[2:])
+		return
+	}
 	cooldown, err := time.ParseDuration(env("PAINT_COOLDOWN", "30s"))
 	if err != nil {
 		log.Fatalf("PAINT_COOLDOWN: %v", err)

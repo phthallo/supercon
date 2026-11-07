@@ -28,9 +28,12 @@
     <section class="box">
       <h2>Upload song</h2>
       <form id="upload" class="upload">
-        <label>JSON <input type="file" name="song" accept=".json,application/json" required></label>
         <label>Audio <input type="file" name="audio" accept=".mp3,.ogg,audio/mpeg,audio/ogg"></label>
-        <label>ID <input class="text-input" name="id" maxlength="40" placeholder="demo100"></label>
+        <label>Title <input class="text-input" name="title" maxlength="80" placeholder="Undo U"></label>
+        <label>Artist <input class="text-input" name="artist" maxlength="80" placeholder="Ninajirachi"></label>
+        <label>Charts <input type="file" name="song" accept=".json,application/json"></label>
+        <p class="muted">Leave charts empty to generate them from the mp3.</p>
+        <label>ID <input class="text-input" name="id" maxlength="40" placeholder="undo-u"></label>
         <div><button class="link" type="submit">[ upload ]</button></div>
         <p id="upload-msg" class="error" role="alert"></p>
       </form>
