@@ -50,7 +50,7 @@ def _steps(tables):
 
     tables maps a table index to 10 (first half, second half) levels; the others stay at ground.
     Group bytes: level (2 bits per phase), on1, off1, ph2a, on2, off2, ph2b, repeat. A zero
-    on, ph2 or repeat count makes the group run for ~4 s, so 2 frames is the shortest group.
+    on, ph2 or repeat count makes the group run for ~4 s, so with both phases on, 2 frames is the shortest group.
     """
     out = bytearray(400)
     for o in range(0, 400, 8):
@@ -70,3 +70,23 @@ LUTB_DELTA = _steps({
     2: [(_VDH, _VDL)] + [(_VDL, _VDL)] * 9,  # black to white
     3: [(_GND, _GND)] * 8 + [(_VDH, _GND)] * 2,  # stays black
 })
+
+
+def _fast_table():
+    """Driver B table of 10 one-frame groups, ~290 ms: 9 frames of drive, then ground.
+
+    Every group runs one frame of its second phase: ph2a 0, on2 1, off2 0, with the level in
+    bits 3-2. Zeroing on1 and off1 together, repeat, or ph2b hangs the CoG.
+    """
+    out = bytearray(400)
+    for o in range(0, 400, 8):
+        out[o + 1 : o + 8] = b"\x01\x01\x00\x01\x00\x01\x01"
+    for g in range(9):
+        out[(10 + g) * 8] = _VDH << 2  # white to black
+        out[(20 + g) * 8] = _VDL << 2  # black to white
+    return bytes(out)
+
+
+# Driver B, change-only, as LUTB_DELTA but half the drive: ink comes out lighter and unchanged
+# pixels get no push, so ghosts stay until the next clean frame.
+LUTB_FAST = _fast_table()

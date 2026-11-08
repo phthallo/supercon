@@ -95,6 +95,7 @@ _SAME = bytes(range(256))
 _CHUNK = const(2400)
 _SPLIT_ROWS = const(56)
 _split_table = bytearray(256)
+_NO_ROWS = const(-1)
 
 
 @micropython.viper
@@ -158,6 +159,33 @@ def _rgb565_row(src: ptr8, black: ptr8, red: ptr8, pos_width: int):
             red[byte] = red[byte] & keep
 
 
+@micropython.viper
+def _changed_rows(a: ptr8, b: ptr8) -> int:
+    """Rows where two half planes differ, as first << 10 | last. -1 if none."""
+    first = -1
+    last = -1
+    i = 0
+    for row in range(display_height):
+        for c in range(display_half_width_bytes):
+            if a[i + c] != b[i + c]:
+                if first < 0:
+                    first = row
+                last = row
+                break
+        i += display_half_width_bytes
+    if first < 0:
+        return -1
+    return first << 10 | last
+
+
+def _union_rows(a: int, b: int) -> int:
+    if a < 0:
+        return b
+    if b < 0:
+        return a
+    return min(a >> 10, b >> 10) << 10 | max(a & 0x3FF, b & 0x3FF)
+
+
 def _busy() -> bool:
     return not EPD_BUSY1_PIN.value() or not EPD_BUSY2_PIN.value()
 
@@ -205,8 +233,13 @@ class EPaperDisplay:
         # A delta session is open: COG initialised and booster running, so a frame is planes + 0x15.
         self._hot = False
         self._session_frames = 0
-        # Reopening a session delays that frame by ~430 ms. Apps that need a steady frame rate raise this.
+        # Closing and reopening a session delays that frame by ~600 ms. Apps that need a steady frame rate raise this.
         self.session_max_frames = _SESSION_MAX_FRAMES
+        # Delta frames use LUTB_FAST: ~360 ms a frame instead of ~650 ms, with lighter ink.
+        self.fast_frames = False
+        self._hot_fast = False
+        # Per CoG, the rows the last pull changed: 0x10 still holds the frame before them.
+        self._prev_rows = (_NO_ROWS, _NO_ROWS)
         self._last_frame = 0
         # A delta refresh is still running on the panel.
         self._inflight = False
@@ -301,18 +334,25 @@ class EPaperDisplay:
         halves = tuple(bytearray(half_frame_one_color_size) for _ in range(4))
         _split_table[:] = _REVERSED if self._reverse_fb_bits else _SAME
         black_left, red_left, black_right, red_right = halves
-        bands = _split_bands(self._framebuffer_black, black_left, black_right)
-        bands += _split_bands(self._framebuffer_red, red_left, red_right)
+        black_bands = _split_bands(self._framebuffer_black, black_left, black_right)
+        red_bands = _split_bands(self._framebuffer_red, red_left, red_right)
         for h in halves + self._film:
             self._plane_chunks[id(h)] = _chunks(h)
+        # The red halves still hold the last frame's red and need one more split to clear.
+        red_stale = False
         while True:
             if self._framebuffer_ready.is_set():
                 self._display_updated.clear()
                 # Cleared before the copy, so an update() during the refresh queues another one.
                 self._framebuffer_ready.clear()
-                for band in bands:
+                has_red = bool(_any_set(self._framebuffer_red, half_frame_one_color_size * 2))
+                for band in black_bands:
                     _split_band(*band)
-                delta = await self.global_update(black_left, red_left, black_right, red_right)
+                if has_red or red_stale:
+                    for band in red_bands:
+                        _split_band(*band)
+                red_stale = has_red
+                delta = await self.global_update(black_left, red_left, black_right, red_right, has_red)
                 # A collection takes ~140 ms with nothing else running, so frame-rate apps skip it.
                 if not delta:
                     gc.collect()
@@ -327,22 +367,21 @@ class EPaperDisplay:
         red_left: bytearray | bytes | memoryview[int],
         black_right: bytearray | bytes | memoryview[int],
         red_right: bytearray | bytes | memoryview[int],
+        has_red: bool,
     ):
-        has_red = bool(
-            _any_set(red_left, half_frame_one_color_size)
-            or _any_set(red_right, half_frame_one_color_size)
-        )
+        left_rows = right_rows = _NO_ROWS
+        if self._can_delta(has_red):
+            left_rows = _changed_rows(black_left, self._film[0])
+            right_rows = _changed_rows(black_right, self._film[1])
+            if left_rows < 0 and right_rows < 0:
+                return True
         waited = time.ticks_ms()
         await self._finish()
         start = time.ticks_ms()
         waited = time.ticks_diff(start, waited)
-        # Delta needs the film's exact contents, and its waveform can't move red pigment.
-        delta = (
-            self._driver_b and self._film_ok and not has_red and not self._screen_red
-            and self._delta_frames < _CLEAN_EVERY
-        )
+        delta = self._can_delta(has_red)
         if delta:
-            sent = await self._delta_update(black_left, black_right)
+            sent = await self._delta_update(black_left, black_right, left_rows, right_rows)
             print(
                 "epd: delta sent in", time.ticks_diff(sent, start),
                 "ms after waiting", waited, "ms for the previous refresh",
@@ -354,6 +393,13 @@ class EPaperDisplay:
                 "ms, refreshed in", time.ticks_diff(time.ticks_ms(), sent), "ms",
             )
         return delta
+
+    def _can_delta(self, has_red: bool) -> bool:
+        """Delta needs the film's exact contents, and its waveform can't move red pigment."""
+        return (
+            self._driver_b and self._film_ok and not has_red and not self._screen_red
+            and self._delta_frames < _CLEAN_EVERY
+        )
 
     def delta_frames_left(self) -> int:
         """Delta frames before one goes through the full ~6 s waveform. 0 if the next one will."""
@@ -382,26 +428,35 @@ class EPaperDisplay:
             self._film[1][:] = black_right
         return sent
 
-    async def _delta_update(self, black_left, black_right):
+    async def _delta_update(self, black_left, black_right, left_rows, right_rows):
         """Redraw only the pixels that changed: the previous frame goes in the red plane.
 
         Returns once the refresh has started, so the next frame can be drawn while the panel
         runs it. Caller must have awaited _finish(): planes sent while the panel is busy are dropped.
         """
         film_left, film_right = self._film
-        if self._session_frames >= self.session_max_frames:
+        fast = self.fast_frames
+        if self._session_frames >= self.session_max_frames or (self._hot and fast != self._hot_fast):
             await self._close_session()
         if self._hot:
-            self._send_images(black_left, film_left, black_right, film_right)
+            # The CoG swaps 0x10 and 0x11 after a pull, so 0x11 already holds the film and 0x10
+            # only differs from the new frame in the rows of this change and the last one.
+            prev_left, prev_right = self._prev_rows
+            self._send_rows(self._send_index_data_left, black_left, _union_rows(left_rows, prev_left))
+            self._send_rows(self._send_index_data_right, black_right, _union_rows(right_rows, prev_right))
+            # The pull scans the DUW window, so it has to cover the whole panel again.
+            self._send_index_data(0x13, [0x00, 0x3B, 0x00, 0x00, 0x9F, 0x02])
             sent = time.ticks_ms()
         else:
             await self._reset()
             self._send_images(black_left, film_left, black_right, film_right)
             sent = time.ticks_ms()
-            await self.cog_initial(luts.LUTB_DELTA)
+            await self.cog_initial(luts.LUTB_FAST if fast else luts.LUTB_DELTA)
             await self._dcdc_soft_start()
             self._hot = True
+            self._hot_fast = fast
             self._session_frames = 0
+        self._prev_rows = (left_rows, right_rows)
         self._send_index_data(0x15, [0x3C])
         await self._wait_busy(50)
         self._inflight = True
@@ -411,6 +466,15 @@ class EPaperDisplay:
         self._delta_frames += 1
         self._last_frame = time.ticks_ms()
         return sent
+
+    def _send_rows(self, send, plane, rows: int):
+        """Write rows of a half plane to one CoG's 0x10 RAM. send picks the CoG."""
+        if rows < 0:
+            return
+        first, last = rows >> 10, rows & 0x3FF
+        send(0x13, [0x00, 0x3B, first & 0xFF, first >> 8, last & 0xFF, last >> 8])
+        send(0x12, [0x3B, first & 0xFF, 0x14 | first >> 8])
+        send(0x10, memoryview(plane)[first * display_half_width_bytes : (last + 1) * display_half_width_bytes])
 
     async def _finish(self):
         """Wait for a refresh a delta frame left running. A hung one resets the controller."""
@@ -450,37 +514,38 @@ class EPaperDisplay:
     async def cog_initial(self, waveform: bytes | None):
         """Register sequence from documentation/itc97-driver-sheets.pdf, ending with the waveform write.
 
-        The waits are a quarter of the sheet's (1210 ms in total there). On driver B the panel
-        took the 0xB0 table and drew cleanly with them.
+        Driver 8 waits a quarter of the sheet's times (1210 ms in total there).
         """
+        # Driver B latches 0xB0 with far shorter waits. A write that misses shows as a ~33 s pull.
+        settle, high, low, load = (1, 2, 10, 10) if self._driver_b else (10, 25, 25, 125)
         self._send_index_data(0x05, [0x7D])
         await aio.sleep_ms(50)
         self._send_index_data(0x05, [0x00])
-        await aio.sleep_ms(10)
+        await aio.sleep_ms(settle)
         if not self._driver_b:
             self._send_index_data(0xC2, [0x3F])
         self._send_index_data(0xD8, [0x80])  # MS_SYNC
         self._send_index_data(0xD6, [0x00])  # BVSS
         self._send_index_data(0xA7, [0x10])
-        await aio.sleep_ms(25)
+        await aio.sleep_ms(high)
         self._send_index_data(0xA7, [0x00])
-        await aio.sleep_ms(25)
+        await aio.sleep_ms(low)
         if not self._driver_b:
             self._send_index_data(0x03, [0x00, 0x11])  # OSC
 
         self._send_index_data(0x44, [0x00])
         self._send_index_data(0x45, [0x80])
         self._send_index_data(0xA7, [0x10])
-        await aio.sleep_ms(25)
+        await aio.sleep_ms(high)
         self._send_index_data(0xA7, [0x00])
-        await aio.sleep_ms(25)
+        await aio.sleep_ms(low)
         self._send_index_data(0x44, [0x06])
         self._send_index_data(0x45, [0x84 if self._driver_b else 0x86])  # bank for the 9.7" panel
         self._send_index_data(0xA7, [0x10])
-        await aio.sleep_ms(25)
+        await aio.sleep_ms(high)
         self._send_index_data(0xA7, [0x00])
         # This strobe loads the OTP waveform; writing 0xB0 before it has finished gets overwritten.
-        await aio.sleep_ms(125)
+        await aio.sleep_ms(load)
 
         self._send_index_data(0x60, [0x25])  # TCON
         self._send_index_data_left(0x61, [0x01])  # STV_DIR for Display 1
@@ -529,8 +594,10 @@ class EPaperDisplay:
     def _write_chunked(self, data):
         chunks = self._plane_chunks.get(id(data))
         if chunks is None:
-            self.spi.write(_wire(data))
-            return
+            if len(data) <= _CHUNK:
+                self.spi.write(_wire(data))
+                return
+            chunks = _chunks(data)
         for chunk in chunks:
             self.spi.write(chunk)
 
@@ -579,13 +646,13 @@ class EPaperDisplay:
 
     async def _reset(self):
         """CoG driver power-on hard reset"""
-        # A quarter of the sheet's 50/100/400 ms, which worked on driver B.
+        high, low, settle = (2, 4, 25) if self._driver_b else (12, 25, 100)
         EPD_RST_PIN.value(True)
-        await aio.sleep_ms(12)
+        await aio.sleep_ms(high)
         EPD_RST_PIN.value(False)
-        await aio.sleep_ms(25)
+        await aio.sleep_ms(low)
         EPD_RST_PIN.value(True)
-        await aio.sleep_ms(100)
+        await aio.sleep_ms(settle)
         EPD_CS1_PIN.value(True)
         EPD_CS2_PIN.value(True)
         if self._driver_b:
