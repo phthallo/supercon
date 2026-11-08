@@ -6,7 +6,7 @@ import sys
 import btree
 
 from apps.base_app import BaseApp
-from lib.button import MenuMinus, MenuPlus, UserA, UserB, PRESSED_READ
+from lib.button import MenuMinus, MenuPlus, UserA, UserB, PRESSED_READ, UNPRESSED
 from lib.led_bar import leds
 
 # Apps with owns_menu_buttons give the menu back when both buttons are held this long.
@@ -112,9 +112,14 @@ class AppSwitcher:
                 if open_menu:
                     self.selection_idx = self.active_idx
                     self.selecting_mode = True
-                    ## Reset pressed state so that button doesn't advance menu, just enters menu state
+                    ## Reset pressed state so that button doesn't advance menu, just enters menu state.
+                    ## User buttons too: an app may never read them, and an unread press would launch the selection.
                     MenuMinus._pressed_state = PRESSED_READ
                     MenuPlus._pressed_state = PRESSED_READ
+                    if UserA._pressed_state != UNPRESSED:
+                        UserA._pressed_state = PRESSED_READ
+                    if UserB._pressed_state != UNPRESSED:
+                        UserB._pressed_state = PRESSED_READ
                     print("Activated app switching")
                 await self.apps[self.active_idx].arun()
                 await aio.sleep_ms(0)

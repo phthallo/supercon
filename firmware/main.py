@@ -1,6 +1,13 @@
+import machine
 import micropython
 import time
 import asyncio as aio
+import lvgl
+
+# A display left over from before a soft reset points into the wiped heap.
+# The simulator imports this module after creating its display, so __name__ is checked.
+if __name__ == "__main__" and lvgl.display_get_default() is not None:
+    machine.reset()
 
 try:
     time.sleep(0.5)
@@ -68,6 +75,11 @@ async def main():
 
 
 if __name__ == "__main__":
-
-
-    aio.run(main())
+    try:
+        aio.run(main())
+    finally:
+        # Must happen before the heap is wiped. deinit alone crashes.
+        _disp = lvgl.display_get_default()
+        if _disp:
+            _disp.delete()
+        lvgl.deinit()
