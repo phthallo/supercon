@@ -83,6 +83,7 @@ h1 { font-size: 2.25rem; margin: 8px 0; font-weight: 700; }
 h2 { font-size: 1.25rem; color: var(--accent); margin: 16px 0 8px; }
 p { margin: 8px 0 16px; }
 .muted { color: var(--muted); }
+.photo { display: block; width: 100%; max-width: 640px; height: auto; border: 1px solid var(--line); }
 
 .stage-wrap {
   border: 1px solid var(--line);
