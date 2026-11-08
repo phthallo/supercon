@@ -7,7 +7,7 @@ Modified firmware for the [Supercon 2026 Billboard eink badge](https://github.co
 | Ink | Quadrant |
 |----|-----|
 | Use my badge as a canvas! | Play a rhythm game using the buttons on the back of the screen |
-| | | 
+| <img width="550" height="452" alt="image" src="https://github.com/user-attachments/assets/c65c210c-bb7b-41b6-b67a-fe571879547f" /> | <img width="1036" height="918" alt="image" src="https://github.com/user-attachments/assets/e8e49963-3c37-4c17-ba09-35ffccc0b089" /> | 
 
 ## Build and flash
 
