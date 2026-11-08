@@ -24,6 +24,8 @@ CFG_PATH = "/data/quadrant_cfg.json"
 CALIB_NOTES = 24
 # Taps on the first notes are left out of calibration while the player finds the beat.
 CALIB_WARMUP = 4
+# Web player track for Calibrate. Same 100 BPM grid and zero offset, so its kicks land on the notes.
+CALIB_TRACK = "demo100"
 DIFFS = ("easy", "normal", "hard")
 DIFF_DOTS = (1, 3, 5)
 # Index = button id from lib.button.next_press().
@@ -443,7 +445,7 @@ class Quadrant(BaseApp):
 
     def _player(self, action, **body):
         """Send a web player command. Never raises, since the game plays on without the web player."""
-        if not self.net or self.game.song.get("calib"):
+        if not self.net:
             return
         try:
             if action in ("start", "resume"):
@@ -543,7 +545,7 @@ class Quadrant(BaseApp):
             else:
                 first = r.notes[0][0] if r.notes else 0
                 s0 = min(0, first - TRAVEL_FRAMES * P) - P
-                if self.net and not r.song.get("calib"):
+                if self.net:
                     # Gives the web player time to fetch and decode the audio.
                     s0 = min(s0, -3000)
             r.started = True
@@ -560,7 +562,7 @@ class Quadrant(BaseApp):
             while not display.is_done_updating():
                 await aio.sleep_ms(20)
             button.clear_presses()
-            if self.net and not r.song.get("calib"):
+            if self.net:
                 try:
                     # The badge clock drifts from the server's by up to ~0.1 s in half an hour.
                     self.net.sync()
@@ -570,7 +572,7 @@ class Quadrant(BaseApp):
             if resume:
                 self._player("resume")
             else:
-                self._player("start", song=r.song["id"], diff=r.diff)
+                self._player("start", song=CALIB_TRACK if r.song.get("calib") else r.song["id"], diff=r.diff)
         while True:
             T = r.phase + r.next_frame * P
             if T > r.end_ms:
@@ -728,6 +730,7 @@ class Quadrant(BaseApp):
 
     def _finish(self, r):
         if r.song.get("calib"):
+            self._player("stop")
             self._write_log(r)
             self.result = self._calib_result(r)
             self.state = RESULTS
