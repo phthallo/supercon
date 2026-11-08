@@ -76,6 +76,7 @@ b { color: var(--accent); }
 .navbox .crumbs a, .navbox .site a { text-decoration: none; }
 .navbox .site { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .navbox nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 8px; font-size: 14px; }
+.navbox nav.tabs { justify-content: flex-start; }
 .navbox nav a { text-decoration: none; line-height: 1; }
 
 h1 { font-size: 2.25rem; margin: 8px 0; font-weight: 700; }
