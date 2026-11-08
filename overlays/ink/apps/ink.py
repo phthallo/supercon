@@ -95,7 +95,7 @@ class InkApp(BaseApp):
                 cfg = json.load(f)
         except OSError:
             cfg = {}
-        self.url = cfg.get("server", "https://ink.underwhelm.ing").rstrip("/") + "/badge/frame"
+        self.url = cfg.get("server", "").rstrip("/") + "/badge/frame"
         self.poll_s = cfg.get("poll_s", 60)
         self._etag = None
         self._next = 0

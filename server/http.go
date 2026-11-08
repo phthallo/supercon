@@ -38,6 +38,7 @@ type Server struct {
 	limiter       *Limiter
 	hub           *Hub
 	rhythm        *Rhythm
+	legacyHosts   map[string]string
 	adminPassword string
 	ipHeader      string
 	// Prefilled on /install. Public: anyone can read it from the page.
@@ -50,9 +51,15 @@ func (s *Server) Routes() http.Handler {
 	static := http.FileServerFS(web)
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /{$}", s.page(web, "index.html"))
+	mux.HandleFunc("GET /{$}", s.page(web, "home.html"))
 	mux.HandleFunc("GET /admin", s.admin(s.page(web, "admin.html")))
-	mux.HandleFunc("GET /install", s.page(web, "install.html"))
+	mux.HandleFunc("GET /ink", s.page(web, "ink.html"))
+	mux.Handle("GET /ink/{$}", http.RedirectHandler("/ink", http.StatusMovedPermanently))
+	mux.HandleFunc("GET /ink/install", s.page(web, "install.html"))
+	mux.HandleFunc("GET /quadrant", s.page(web, "quadrant.html"))
+	mux.Handle("GET /quadrant/{$}", http.RedirectHandler("/quadrant", http.StatusMovedPermanently))
+	mux.HandleFunc("GET /quadrant/play", s.page(web, "play.html"))
+	mux.HandleFunc("GET /quadrant/c/{code}", s.page(web, "claim.html"))
 	mux.HandleFunc("GET /api/install", s.handleInstall)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", static))
 	firmware, _ := fs.Sub(firmwareFS, "firmware")
@@ -83,7 +90,70 @@ func (s *Server) Routes() http.Handler {
 		return sameOrigin(s.blockBanned(mux))
 	}
 	s.rhythmAPI(mux)
-	return sameOrigin(s.blockBanned(s.byHost(mux, s.quadrantRoutes(web))))
+	return sameOrigin(s.blockBanned(s.redirectLegacyHosts(mux)))
+}
+
+// legacyHostPaths maps the domains ink and Quadrant used to have to their paths on the main site.
+func legacyHostPaths(ink, quadrant string) map[string]string {
+	hosts := map[string]string{}
+	if ink != "" {
+		hosts[strings.ToLower(ink)] = "/ink"
+	}
+	if quadrant != "" {
+		hosts[strings.ToLower(quadrant)] = "/quadrant"
+	}
+	return hosts
+}
+
+// redirectLegacyHosts sends browsers on an old domain to the main site. Badges flashed before
+// the move keep calling /api and /badge there and cannot follow redirects.
+func (s *Server) redirectLegacyHosts(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		prefix, legacy := s.legacyHosts[strings.ToLower(host)]
+		if !legacy || strings.EqualFold(host, s.rhythm.host) || !isPageRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Redirect(w, r, s.rhythm.baseURL+legacyTarget(prefix, r.URL), http.StatusFound)
+	})
+}
+
+func isPageRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	p := r.URL.Path
+	if p == "/ws" || p == "/healthz" {
+		return false
+	}
+	for _, prefix := range []string{"/api/", "/badge/", "/static/", "/install/files/"} {
+		if strings.HasPrefix(p, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+func legacyTarget(prefix string, u *url.URL) string {
+	if u.Path == "/admin" {
+		return "/admin#" + strings.TrimPrefix(prefix, "/")
+	}
+	path := u.EscapedPath()
+	switch {
+	case u.Path == "/":
+		path = prefix
+	// New badge builds show the /quadrant path, even when configured with the old domain.
+	case u.Path != prefix && !strings.HasPrefix(u.Path, prefix+"/"):
+		path = prefix + path
+	}
+	if u.RawQuery != "" {
+		path += "?" + u.RawQuery
+	}
+	return path
 }
 
 // blockBanned refuses banned IPs everywhere except admin (and the static files
@@ -143,7 +213,7 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, pass, ok := r.BasicAuth()
 		if s.adminPassword == "" || !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(s.adminPassword)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="ink admin"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="supercon admin"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

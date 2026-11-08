@@ -13,7 +13,6 @@ import (
 	"io/fs"
 	"log"
 	"math"
-	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -98,7 +97,7 @@ type Rhythm struct {
 func newRhythm(db *sql.DB, baseURL, badgeKey string) (*Rhythm, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Hostname() == "" {
-		return nil, fmt.Errorf("QUADRANT_URL %q is not an absolute URL", baseURL)
+		return nil, fmt.Errorf("SITE_URL %q is not an absolute URL", baseURL)
 	}
 	r := &Rhythm{
 		db: db, baseURL: strings.TrimRight(baseURL, "/"), host: u.Hostname(), badgeKey: badgeKey, now: time.Now,
@@ -487,40 +486,6 @@ func (l *windowLimiter) Allow(key string) bool {
 
 // HTTP.
 
-func (s *Server) isQuadrantHost(r *http.Request) bool {
-	if s.rhythm == nil {
-		return false
-	}
-	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	return strings.EqualFold(host, s.rhythm.host) || strings.EqualFold(host, "quadrant.localhost")
-}
-
-func (s *Server) byHost(ink, quadrant http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.isQuadrantHost(r) {
-			quadrant.ServeHTTP(w, r)
-			return
-		}
-		ink.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) quadrantRoutes(web fs.FS) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.page(web, "quadrant.html"))
-	mux.HandleFunc("GET /play", s.page(web, "play.html"))
-	mux.HandleFunc("GET /c/{code}", s.page(web, "claim.html"))
-	mux.HandleFunc("GET /admin", s.admin(s.page(web, "quadrant-admin.html")))
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(web)))
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
-	s.rhythmAPI(mux)
-	return mux
-}
-
-// rhythmAPI is mounted on both hosts so a badge can use whichever one it was given.
 func (s *Server) rhythmAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/rhythm/time", s.handleRhythmTime)
 	mux.HandleFunc("GET /api/rhythm/songs", s.handleSongs)
@@ -778,7 +743,7 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusInternalServerError, "failed to save run")
 		return
 	}
-	claimURL := s.rhythm.baseURL + "/c/" + code
+	claimURL := s.rhythm.baseURL + "/quadrant/c/" + code
 	if s.rhythm.isBadge(r) {
 		s.rhythm.command(func(st *PlayerState) error {
 			*st = PlayerState{T: "result", Song: song.ID, Diff: body.Diff, Score: want.Score, Acc: want.Acc, Grade: want.Grade}

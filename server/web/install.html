@@ -14,8 +14,8 @@
   <header>
     <div class="navbox">
       <div class="row">
-        <span class="crumbs">/ <a href="/">home</a> / <a href="/">ink</a> / <a href="/install">install</a></span>
-        <button class="link" id="theme" type="button">[ light ]</button>
+        <span class="crumbs">/ <a href="/">supercon</a> / <a href="/ink">ink</a> / <a href="/ink/install">install</a></span>
+        <span class="site"><a href="/quadrant">[ quadrant ]</a> <button class="link" id="theme" type="button">[ light ]</button></span>
       </div>
     </div>
     <h1>install.</h1>
@@ -27,7 +27,7 @@
 
     <section class="panel">
       <h2>wifi</h2>
-      <p class="muted">Saved on your badge only, next to the networks already on it. It joins whichever network is in range. Networks with a sign-in page won't work, but a phone hotspot will.</p>
+      <p class="muted">Saved on your badge only. Networks with a sign-in page won't work, but a phone hotspot will.</p>
       <div id="networks"></div>
       <button class="link" id="add-network" type="button">[ + network ]</button>
       <button class="link" id="load-wifi" type="button">[ load from badge ]</button>
@@ -63,26 +63,27 @@
 
     <section id="self-host">
       <h2>host your own</h2>
-      <p>Want a canvas for just your friends? Run your own copy of this site. Badges installed from your site show your canvas.</p>
+      <p>Badges installed from your own copy of this site show your canvas.</p>
       <ol>
         <li>Fork <a href="https://github.com/phthallo/supercon">phthallo/supercon</a>.</li>
         <li>Deploy <code>server/</code> on any host that runs containers (Coolify, Fly.io, a VPS). <code>docker compose up</code> in <code>server/</code> starts it with a Postgres database.</li>
         <li>Serve it over https. The flasher and USB access only work on secure pages.</li>
         <li>Set the environment variables below.</li>
-        <li>Open <code>/install</code> on your site and install as above.</li>
+        <li>Open <code>/ink/install</code> on your site and install as above.</li>
       </ol>
       <table class="env">
         <tr><td><code>DATABASE_URL</code></td><td>a <code>postgres://</code> URL. The compose file sets it.</td></tr>
+        <tr><td><code>SITE_URL</code></td><td>your site's public URL, used for Quadrant claim links.</td></tr>
         <tr><td><code>ADMIN_PASSWORD</code></td><td>password for <code>/admin</code>, where you add text and images. Admin is off without it.</td></tr>
         <tr><td><code>PAINT_COOLDOWN</code></td><td>wait between paints, like <code>30s</code>. <code>0s</code> turns it off.</td></tr>
         <tr><td><code>WIFI_SSID</code>, <code>WIFI_PASSWORD</code></td><td>a network to prefill on this page.</td></tr>
         <tr><td><code>TRUSTED_PROXY_HEADER</code></td><td>header holding the visitor's IP behind a proxy. Defaults to <code>X-Forwarded-For</code> in the Docker image.</td></tr>
       </table>
-      <p>To change the badge app or the full image, edit the repo and run <code>.venv/bin/python tools/build.py supercon ink --release</code>, then redeploy. The README covers setting up the tools.</p>
+      <p>To change the badge app or the full image, edit the repo and run <code>.venv/bin/python tools/build.py supercon ink --release</code> with <code>SITE_URL</code> set, then redeploy. The README covers setting up the tools.</p>
     </section>
   </main>
 
-  <footer><a href="/">[ canvas ]</a></footer>
+  <footer><a href="https://phthallo.com">phthallo</a></footer>
 </div>
 <script src="/static/theme.js"></script>
 <script src="/static/repl.js"></script>

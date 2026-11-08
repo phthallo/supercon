@@ -9,7 +9,7 @@
     return td;
   };
 
-  async function songs() {
+  async function loadSongs() {
     const { songs } = await (await fetch("/api/rhythm/songs")).json();
     $("songs").replaceChildren(...songs.map((s) => {
       const tr = document.createElement("tr");
@@ -18,13 +18,13 @@
         button("[ delete ]", async () => {
           if (!confirm(`Delete ${s.title}? Its scores stay and come back if you upload it again with id ${s.id}.`)) return;
           await fetch(`/api/admin/rhythm/songs/${encodeURIComponent(s.id)}`, { method: "DELETE" });
-          songs();
+          loadSongs();
         }));
       return tr;
     }));
   }
 
-  async function runs() {
+  async function loadRuns() {
     const { runs } = await (await fetch("/api/admin/rhythm/runs")).json();
     $("runs").replaceChildren(...runs.map((r) => {
       const tr = document.createElement("tr");
@@ -32,7 +32,7 @@
         button("[ remove ]", async () => {
           if (!confirm(`Remove ${r.name}'s run from the leaderboard?`)) return;
           await fetch(`/api/admin/rhythm/runs/${r.id}`, { method: "DELETE" });
-          runs();
+          loadRuns();
         }));
       return tr;
     }));
@@ -53,9 +53,9 @@
       return;
     }
     e.target.reset();
-    songs();
+    loadSongs();
   });
 
-  songs();
-  runs();
+  loadSongs();
+  loadRuns();
 })();

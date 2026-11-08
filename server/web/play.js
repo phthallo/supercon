@@ -237,7 +237,7 @@
 
   $("claim").addEventListener("submit", (e) => {
     e.preventDefault();
-    location.href = `/c/${encodeURIComponent($("claim-code").value.trim().toUpperCase())}`;
+    location.href = `/quadrant/c/${encodeURIComponent($("claim-code").value.trim().toUpperCase())}`;
   });
 
   // Browsers only start audio after a click, so the player waits for one.

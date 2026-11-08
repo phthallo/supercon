@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ink admin</title>
+  <title>admin | supercon</title>
   <script>try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -12,84 +12,130 @@
   <header>
     <div class="navbox">
       <div class="row">
-        <span class="crumbs">/ <a href="/">home</a> / <a href="/">ink</a> / <a href="/admin">admin</a></span>
+        <span class="crumbs">/ <a href="/">supercon</a> / <a href="/admin">admin</a></span>
         <button class="link" id="theme" type="button">[ light ]</button>
       </div>
       <hr>
       <nav>
+        <a href="#ink" data-tab="ink">[ ink ]</a>
+        <a href="#quadrant" data-tab="quadrant">[ quadrant ]</a>
+      </nav>
+    </div>
+    <h1>admin.</h1>
+  </header>
+
+  <main>
+    <div data-panel="ink">
+      <div class="actions">
         <button class="link" data-add="text" type="button">[ + text ]</button>
         <button class="link" data-add="box" type="button">[ + box ]</button>
         <button class="link" data-add="image" type="button">[ + image ]</button>
         <button class="link" id="clear-canvas" type="button">[ clear canvas ]</button>
-      </nav>
-    </div>
-    <h1>widgets.</h1>
-  </header>
-
-  <main class="admin-grid">
-    <div>
-      <div class="stage-wrap" id="viewport">
-        <div class="stage" id="stage">
-          <img id="preview" alt="badge preview" src="/badge/frame.png">
-          <canvas id="highlight" class="highlight" width="240" height="168" aria-hidden="true"></canvas>
-        </div>
       </div>
+      <div class="admin-grid">
+        <div>
+          <div class="stage-wrap" id="viewport">
+            <div class="stage" id="stage">
+              <img id="preview" alt="badge preview" src="/badge/frame.png">
+              <canvas id="highlight" class="highlight" width="240" height="168" aria-hidden="true"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <aside class="panel" id="panel">
+          <p class="muted" id="empty">Select a widget to edit it.</p>
+          <form id="form" hidden>
+            <h2 id="form-title">widget</h2>
+            <label data-for="text">text <textarea name="text"></textarea></label>
+            <div class="row2">
+              <label>x <input name="x" type="number"></label>
+              <label>y <input name="y" type="number"></label>
+              <label>w <input name="w" type="number" min="1" max="960"></label>
+              <label>h <input name="h" type="number" min="1" max="672"></label>
+              <label>z <input name="z" type="number"></label>
+              <label>border <input name="border" type="number" min="0" max="64"></label>
+            </div>
+            <label>colour <input name="color" type="color"></label>
+            <label data-for="text box">fill
+              <span class="fill-row"><input name="has_fill" type="checkbox" aria-label="has fill"><input name="fill" type="color" aria-label="fill colour"></span>
+            </label>
+            <label data-for="text">font
+              <select name="font">
+                <option value="mono">mono</option><option value="mono-bold">mono bold</option>
+                <option value="sans">sans</option><option value="sans-bold">sans bold</option>
+                <option value="italic">italic</option><option value="smallcaps">small caps</option>
+              </select>
+            </label>
+            <label data-for="text">size <input name="font_size" type="number" min="8" max="300"></label>
+            <label data-for="text">align
+              <select name="align"><option value="left">left</option><option value="center">center</option></select>
+            </label>
+            <label data-for="image">image <input name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp"></label>
+            <label data-for="image">greyscale <input name="grey" type="checkbox"></label>
+            <p class="error" id="error" aria-live="polite"></p>
+            <div class="actions">
+              <button class="link" id="to-front" type="button">[ bring to front ]</button>
+              <button class="link" id="to-back" type="button">[ send to back ]</button>
+              <button class="link" id="delete" type="button">[ delete ]</button>
+            </div>
+          </form>
+        </aside>
+      </div>
+
+      <section aria-labelledby="painters-title">
+        <h2 id="painters-title">painters</h2>
+        <p class="error" id="painters-error" aria-live="polite"></p>
+        <div class="table-scroll">
+          <table class="env painters">
+            <thead><tr><th>ip</th><th>showing</th><th>painted</th><th>browsers</th><th>last paint</th><th></th></tr></thead>
+            <tbody id="painters"><tr><td colspan="6" class="muted">loading…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
-    <aside class="panel" id="panel">
-      <p class="muted" id="empty">Select a widget to edit it.</p>
-      <form id="form" hidden>
-        <h2 id="form-title">widget</h2>
-        <label data-for="text">text <textarea name="text"></textarea></label>
-        <div class="row2">
-          <label>x <input name="x" type="number"></label>
-          <label>y <input name="y" type="number"></label>
-          <label>w <input name="w" type="number" min="1" max="960"></label>
-          <label>h <input name="h" type="number" min="1" max="672"></label>
-          <label>z <input name="z" type="number"></label>
-          <label>border <input name="border" type="number" min="0" max="64"></label>
+    <div data-panel="quadrant" hidden>
+      <section class="box">
+        <h2>upload song</h2>
+        <form id="upload" class="upload">
+          <label>Audio <input type="file" name="audio" accept=".mp3,.ogg,audio/mpeg,audio/ogg"></label>
+          <label>Title <input class="text-input" name="title" maxlength="80" placeholder="Undo U"></label>
+          <label>Artist <input class="text-input" name="artist" maxlength="80" placeholder="Ninajirachi"></label>
+          <label>Charts <input type="file" name="song" accept=".json,application/json"></label>
+          <p class="muted">Leave charts empty to generate them from the mp3.</p>
+          <label>ID <input class="text-input" name="id" maxlength="40" placeholder="undo-u"></label>
+          <div><button class="link" type="submit">[ upload ]</button></div>
+          <p id="upload-msg" class="error" role="alert"></p>
+        </form>
+      </section>
+
+      <section class="box">
+        <h2>songs</h2>
+        <div class="table-scroll">
+          <table class="board">
+            <thead><tr><th>id</th><th>title</th><th>audio</th><th>notes</th><th></th></tr></thead>
+            <tbody id="songs"></tbody>
+          </table>
         </div>
-        <label>colour <input name="color" type="color"></label>
-        <label data-for="text box">fill
-          <span class="fill-row"><input name="has_fill" type="checkbox" aria-label="has fill"><input name="fill" type="color" aria-label="fill colour"></span>
-        </label>
-        <label data-for="text">font
-          <select name="font">
-            <option value="mono">mono</option><option value="mono-bold">mono bold</option>
-            <option value="sans">sans</option><option value="sans-bold">sans bold</option>
-            <option value="italic">italic</option><option value="smallcaps">small caps</option>
-          </select>
-        </label>
-        <label data-for="text">size <input name="font_size" type="number" min="8" max="300"></label>
-        <label data-for="text">align
-          <select name="align"><option value="left">left</option><option value="center">center</option></select>
-        </label>
-        <label data-for="image">image <input name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp"></label>
-        <label data-for="image">greyscale <input name="grey" type="checkbox"></label>
-        <p class="error" id="error" aria-live="polite"></p>
-        <div class="actions">
-          <button class="link" id="to-front" type="button">[ bring to front ]</button>
-          <button class="link" id="to-back" type="button">[ send to back ]</button>
-          <button class="link" id="delete" type="button">[ delete ]</button>
+      </section>
+
+      <section class="box">
+        <h2>recent claims</h2>
+        <div class="table-scroll">
+          <table class="board">
+            <thead><tr><th>name</th><th>song</th><th>score</th><th>ip</th><th></th></tr></thead>
+            <tbody id="runs"></tbody>
+          </table>
         </div>
-      </form>
-    </aside>
+      </section>
+    </div>
   </main>
 
-  <section aria-labelledby="painters-title">
-    <h2 id="painters-title">painters</h2>
-    <p class="error" id="painters-error" aria-live="polite"></p>
-    <div class="table-scroll">
-      <table class="env painters">
-        <thead><tr><th>ip</th><th>showing</th><th>painted</th><th>browsers</th><th>last paint</th><th></th></tr></thead>
-        <tbody id="painters"><tr><td colspan="6" class="muted">loading…</td></tr></tbody>
-      </table>
-    </div>
-  </section>
-
-  <footer><a href="/">[ canvas ]</a></footer>
+  <footer><a href="https://phthallo.com">phthallo</a></footer>
 </div>
 <script src="/static/theme.js"></script>
+<script src="/static/admin-tabs.js"></script>
 <script src="/static/admin.js"></script>
+<script src="/static/quadrant-admin.js"></script>
 </body>
 </html>

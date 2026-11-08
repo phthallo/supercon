@@ -73,7 +73,8 @@ b { color: var(--accent); }
 .navbox { border: 1px solid var(--line); margin-bottom: 12px; }
 .navbox > .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px; flex-wrap: wrap; }
 .navbox > hr { margin: 0; border: 0; border-top: 1px solid var(--line); }
-.navbox .crumbs a { text-decoration: none; }
+.navbox .crumbs a, .navbox .site a { text-decoration: none; }
+.navbox .site { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .navbox nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 8px; font-size: 14px; }
 .navbox nav a { text-decoration: none; line-height: 1; }
 
@@ -211,7 +212,8 @@ footer { text-align: center; font-size: 14px; color: var(--muted); padding-top: 
 .panel .fill-row input[type="checkbox"] { width: auto; }
 .panel .fill-row input[type="color"]:disabled { opacity: .3; cursor: default; }
 .panel .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
-.panel .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.panel .actions, [data-panel] > .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+[data-panel] > .actions { margin: 0 0 16px; }
 .error { color: var(--bold); min-height: 1.5em; }
 
 .install-grid { display: grid; gap: 16px; grid-template-columns: 1fr; margin: 16px 0; }

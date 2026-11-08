@@ -114,7 +114,7 @@ func TestDemoSongsParse(t *testing.T) {
 // memRhythm is a Rhythm with the demo songs and no database, for player tests.
 func memRhythm(t *testing.T, now *time.Time) *Rhythm {
 	t.Helper()
-	r, err := newRhythm(nil, "https://quadrant.underwhelm.ing", testBadgeKey)
+	r, err := newRhythm(nil, "https://supercon.underwhelm.ing", testBadgeKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestBadgeKey(t *testing.T) {
 		{testBadgeKey, testBadgeKey, false},
 		{"", "Bearer ", false},
 	} {
-		r, _ := newRhythm(nil, "https://quadrant.underwhelm.ing", tc.key)
+		r, _ := newRhythm(nil, "https://supercon.underwhelm.ing", tc.key)
 		req := httptest.NewRequest("POST", "/", nil)
 		req.Header.Set("Authorization", tc.header)
 		if got := r.isBadge(req); got != tc.want {
@@ -178,7 +178,7 @@ func TestBadgeKey(t *testing.T) {
 func rhythmServer(t *testing.T) (http.Handler, *Rhythm, *time.Time) {
 	t.Helper()
 	s := openTestStore(t)
-	r, err := OpenRhythm(s.db, "https://quadrant.underwhelm.ing", testBadgeKey)
+	r, err := OpenRhythm(s.db, "https://supercon.underwhelm.ing", testBadgeKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,10 @@ func rhythmServer(t *testing.T) (http.Handler, *Rhythm, *time.Time) {
 	if err := r.saveSong(fixture, nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	srv := &Server{store: s, hub: NewHub(), limiter: NewLimiter(0), rhythm: r, adminPassword: "pw"}
+	srv := &Server{
+		store: s, hub: NewHub(), limiter: NewLimiter(0), rhythm: r, adminPassword: "pw",
+		legacyHosts: legacyHostPaths("ink.underwhelm.ing", "quadrant.underwhelm.ing"),
+	}
 	return srv.Routes(), r, &now
 }
 
@@ -246,10 +249,13 @@ func TestRunClaimFlow(t *testing.T) {
 
 	claim := func(counts [4]int, combo int) string {
 		code, out := call(t, h, "POST", "/api/rhythm/runs", runJSON(counts, combo, ""))
-		if code != 201 || !strings.HasPrefix(out["url"].(string), "https://quadrant.underwhelm.ing/c/") {
+		if code != 201 || !strings.HasPrefix(out["url"].(string), "https://supercon.underwhelm.ing/quadrant/c/") {
 			t.Fatalf("POST run = %d %v", code, out)
 		}
 		rows, _ := out["qr"].([]any)
+		if len(rows) > 33 {
+			t.Fatalf("claim QR has %d rows, the badge draws at most 33 with 5 px modules", len(rows))
+		}
 		if len(rows) < 21 || len(rows[0].(string)) != len(rows) {
 			t.Fatalf("qr = %v", out["qr"])
 		}
@@ -347,7 +353,7 @@ func TestPlayerOverHTTP(t *testing.T) {
 	}
 }
 
-func TestHostRoutingAndSongs(t *testing.T) {
+func TestSitePagesAndLegacyHosts(t *testing.T) {
 	h, _, _ := rhythmServer(t)
 	get := func(host, path string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", path, nil)
@@ -356,14 +362,44 @@ func TestHostRoutingAndSongs(t *testing.T) {
 		h.ServeHTTP(rec, req)
 		return rec
 	}
-	if body := get("quadrant.underwhelm.ing", "/").Body.String(); !strings.Contains(body, "<title>Quadrant</title>") {
-		t.Fatal("quadrant host did not serve the quadrant page")
+	const site = "supercon.underwhelm.ing"
+	for path, want := range map[string]string{
+		"/":                "<title>supercon</title>",
+		"/ink":             "<title>ink</title>",
+		"/ink/install":     "install.js",
+		"/quadrant":        "<title>Quadrant</title>",
+		"/quadrant/play":   "play.js",
+		"/quadrant/c/AB12": "claim.js",
+	} {
+		if rec := get(site, path); rec.Code != 200 || !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("GET %s = %d, want a page containing %q", path, rec.Code, want)
+		}
 	}
-	if body := get("quadrant.localhost:8080", "/play").Body.String(); !strings.Contains(body, "play.js") {
-		t.Fatal("quadrant.localhost did not serve the player")
+	for _, tc := range []struct{ host, path, want string }{
+		{"ink.underwhelm.ing", "/", "/ink"},
+		{"ink.underwhelm.ing", "/install", "/ink/install"},
+		{"ink.underwhelm.ing", "/admin", "/admin#ink"},
+		{"quadrant.underwhelm.ing", "/", "/quadrant"},
+		{"quadrant.underwhelm.ing", "/?song=demo128&diff=hard", "/quadrant?song=demo128&diff=hard"},
+		{"quadrant.underwhelm.ing", "/play", "/quadrant/play"},
+		{"quadrant.underwhelm.ing", "/quadrant/play", "/quadrant/play"},
+		{"quadrant.underwhelm.ing:443", "/c/AB12", "/quadrant/c/AB12"},
+		{"QUADRANT.underwhelm.ing", "/admin", "/admin#quadrant"},
+	} {
+		rec := get(tc.host, tc.path)
+		if loc := rec.Header().Get("Location"); rec.Code != http.StatusFound || loc != "https://"+site+tc.want {
+			t.Errorf("%s%s = %d %q, want a redirect to %s", tc.host, tc.path, rec.Code, loc, tc.want)
+		}
 	}
-	if body := get("ink.underwhelm.ing", "/").Body.String(); !strings.Contains(body, "<title>ink</title>") {
-		t.Fatal("ink host changed")
+	for _, tc := range []struct{ host, path string }{
+		{"ink.underwhelm.ing", "/badge/frame"},
+		{"ink.underwhelm.ing", "/healthz"},
+		{"quadrant.underwhelm.ing", "/api/rhythm/time"},
+		{"quadrant.underwhelm.ing", "/api/rhythm/songs"},
+	} {
+		if rec := get(tc.host, tc.path); rec.Code != 200 {
+			t.Errorf("badge path %s%s = %d, want 200", tc.host, tc.path, rec.Code)
+		}
 	}
 	rec := get("ink.underwhelm.ing", "/api/rhythm/songs/demo128")
 	var song Song

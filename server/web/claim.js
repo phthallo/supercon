@@ -7,7 +7,7 @@
 
   function boardLink(name) {
     const q = new URLSearchParams({ song: run.song, diff: run.diff, name });
-    const a = Object.assign(document.createElement("a"), { href: `/?${q}`, textContent: "[ leaderboard ]" });
+    const a = Object.assign(document.createElement("a"), { href: `/quadrant?${q}`, textContent: "[ leaderboard ]" });
     return a;
   }
 

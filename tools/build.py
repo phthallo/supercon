@@ -13,6 +13,7 @@ overlay's file replaces an earlier one at the same path.
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -52,6 +53,22 @@ def collect(overlays):
                 continue
             files[rel] = src
     return files
+
+
+def set_ink_server(files):
+    """Add SITE_URL to data/ink.json, unless an overlay's ink.json already names a server."""
+    if "data/ink.json" not in files:
+        return
+    config = json.loads(files["data/ink.json"].read_text())
+    if "server" in config:
+        return
+    site_url = os.environ.get("SITE_URL")
+    if not site_url:
+        sys.exit("SITE_URL is empty; set it to the site the ink app should use")
+    config["server"] = site_url
+    generated = BUILD / "ink.json"
+    generated.write_text(json.dumps(config))
+    files["data/ink.json"] = generated
 
 
 def build_image(files, kept=None):
@@ -150,6 +167,7 @@ def main():
         sys.exit("no apps in the selected overlays; the app switcher divides by the app count and would crash")
 
     BUILD.mkdir(exist_ok=True)
+    set_ink_server(files)
     image = build_image(files)
     out = BUILD / "vfs.bin"
     out.write_bytes(image)

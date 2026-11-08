@@ -911,7 +911,7 @@ class Quadrant(BaseApp):
         display.red.fill(0)
         link = None
         if self.net:
-            link = self.net.host + "/play"
+            link = self.net.host + "/quadrant/play"
         elif self._online():
             link = self.net_err or "CONNECTING"
         top_bar(fb, F, "QUADRANT", link)
@@ -1101,14 +1101,15 @@ class Quadrant(BaseApp):
                 frame_rect(fb, 570, y - 10, 8, 20, 2)
             F["small"].draw(fb, str(c), 934, y, 1, RIGHT)
 
-        frame_rect(fb, 466, 400, 470, 206, 2)
-        F["small"].draw(fb, "TIMING", 482, 420, 1, 0, 2)
         claim = self.claim if isinstance(self.claim, dict) else None
         if claim and claim.get("qr"):
             hist_w = 245
-            qr(fb, claim["qr"], 734, 402, 200)
+            # 205 keeps 5 px modules on a 33-row code. The frame is drawn over its quiet zone.
+            qr(fb, claim["qr"], 731, 401, 205)
         else:
             hist_w = 445
+        frame_rect(fb, 466, 400, 470, 206, 2)
+        F["small"].draw(fb, "TIMING", 482, 420, 1, 0, 2)
         right = 475 + hist_w
         if r.offsets:
             avg = sum(r.offsets) / len(r.offsets)

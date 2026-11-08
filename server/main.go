@@ -41,7 +41,11 @@ func main() {
 	if badgeKey == "" {
 		log.Print("BADGE_KEY is empty; the badge cannot drive the web player")
 	}
-	rhythm, err := OpenRhythm(store.db, env("QUADRANT_URL", "https://quadrant.underwhelm.ing"), badgeKey)
+	siteURL := os.Getenv("SITE_URL")
+	if siteURL == "" {
+		log.Fatal("SITE_URL is empty; set it to this site's public URL")
+	}
+	rhythm, err := OpenRhythm(store.db, siteURL, badgeKey)
 	if err != nil {
 		log.Fatalf("open quadrant: %v", err)
 	}
@@ -55,6 +59,7 @@ func main() {
 		limiter:       NewLimiter(cooldown),
 		hub:           NewHub(),
 		rhythm:        rhythm,
+		legacyHosts:   legacyHostPaths(os.Getenv("INK_LEGACY_HOST"), os.Getenv("QUADRANT_LEGACY_HOST")),
 		adminPassword: admin,
 		ipHeader:      env("TRUSTED_PROXY_HEADER", ""),
 		wifiSSID:      os.Getenv("WIFI_SSID"),
