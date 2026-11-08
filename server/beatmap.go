@@ -23,7 +23,7 @@ const (
 	bmLeadInMS = 3000 // the first note needs time to travel down its track
 	// The badge redraws every whole number of beats at least this far apart,
 	// counted from the first beat. Notes start and end only on those redraws.
-	minRedrawMS = 700
+	minRedrawMS = 400
 )
 
 // redrawBeats is how many beats pass between badge redraws, as the badge computes it.

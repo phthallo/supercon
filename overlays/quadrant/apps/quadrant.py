@@ -36,8 +36,8 @@ JUDGE_NAMES = ("PERFECT", "GREAT", "GOOD", "MISS")
 JUDGE_POINTS = (300, 200, 100, 0)
 JUDGE_LEDS = ((0, 0, 8), (0, 6, 2), (6, 4, 0), (8, 0, 0))
 TRAVEL_FRAMES = 4
-# A delta frame shows on the panel 580-750 ms after update(), so each frame is sent this early.
-LEAD_MS = 594
+# Each frame starts this early: ~260 ms to draw, ~60 ms to the trigger, ~230 ms into the pull before it shows.
+LEAD_MS = 550
 PAUSE_HOLD_MS = 150
 # A hold counts if the button is let go no earlier than this before its end.
 HOLD_RELEASE_MS = 150
@@ -181,7 +181,7 @@ class Run:
         self.recent = []
         self.fresh = []
         beat = 60000 / song["bpm"]
-        self.period = math.ceil(700 / beat) * beat
+        self.period = math.ceil(400 / beat) * beat
         # Frames fall on the beat grid, which starts at offset_ms. The server places notes on these frames.
         self.phase = (song.get("offset_ms") or 0) % self.period
         last = max(n[0] + n[2] for n in chart) if chart else 0
@@ -319,7 +319,8 @@ class Quadrant(BaseApp):
             cfg = {}
         self.cfg = cfg
         try:
-            self.lead = int(cfg["lead_ms"])
+            # Leads saved as "lead_ms" were calibrated for the slower default waveform.
+            self.lead = int(cfg["fast_lead_ms"])
         except (KeyError, TypeError, ValueError):
             self.lead = LEAD_MS
         # "server" and "key" (the server's BADGE_KEY) turn on the web player.
@@ -498,7 +499,7 @@ class Quadrant(BaseApp):
     def _save_lead(self, lead):
         self.lead = lead
         try:
-            self.cfg["lead_ms"] = lead
+            self.cfg["fast_lead_ms"] = lead
             with open(CFG_PATH, "w") as f:
                 json.dump(self.cfg, f)
         except OSError as e:
@@ -508,7 +509,7 @@ class Quadrant(BaseApp):
         self.game = None
         gc.collect()
         if song.get("calib"):
-            # One note per frame, clockwise round the corners.
+            # One note every 1200 ms, clockwise round the corners.
             chart = [(2400 + k * 1200, (0, 1, 3, 2)[k % 4], 0) for k in range(CALIB_NOTES)]
         else:
             with open(song["path"]) as f:
@@ -532,7 +533,9 @@ class Quadrant(BaseApp):
     async def _play(self):
         r = self.game
         P = r.period
-        display.session_max_frames = 1000
+        # A 10 minute song at the 400 ms floor is 1500 frames, and reopening the session stalls a frame.
+        display.session_max_frames = 2000
+        display.fast_frames = True
         if not r.started or r.resuming:
             resume = r.started
             if resume:
@@ -591,6 +594,7 @@ class Quadrant(BaseApp):
             r.frame_open = True
             r.next_frame += 1
         display.session_max_frames = 20
+        display.fast_frames = False
         leds.fill((0, 0, 0))
         self._finish(r)
 
@@ -694,6 +698,7 @@ class Quadrant(BaseApp):
         MenuMinus._press_onset_ms = now
         button.clear_presses()
         display.session_max_frames = 20
+        display.fast_frames = False
         leds.fill((0, 0, 0))
         self.pause_sel = 0
         self.state = PAUSE
