@@ -49,9 +49,19 @@ func openTestStore(t *testing.T) *Store {
 	return s
 }
 
+func TestPixelForbiddenWithoutPublicPaint(t *testing.T) {
+	req := httptest.NewRequest("POST", "/api/pixel", strings.NewReader(`{"p":[[0,0]],"c":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	(&Server{}).handlePixel(rec, req)
+	if rec.Code != 403 {
+		t.Fatalf("POST = %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestPaintRGBDithersPerCell(t *testing.T) {
 	s := openTestStore(t)
-	h := (&Server{store: s, hub: NewHub(), limiter: NewLimiter(0)}).Routes()
+	h := (&Server{store: s, hub: NewHub(), limiter: NewLimiter(0), publicPaint: true}).Routes()
 	req := httptest.NewRequest("POST", "/api/pixel", strings.NewReader(`{"p":[[0,0],[1,0],[0,1],[1,1]],"rgb":8421504}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
