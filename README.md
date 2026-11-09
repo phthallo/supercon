@@ -26,6 +26,7 @@ python3 -m venv .venv && .venv/bin/pip install littlefs-python esptool mpremote 
 | `INK_LEGACY_HOST`, `QUADRANT_LEGACY_HOST` | empty | Old domains to redirect to `/ink` and `/quadrant` |
 | `IMPORT_SQLITE` | empty | Path to an `ink.db` from the SQLite version (schema 3). Copied in on startup when the database has no paint or widgets yet |
 | `ADMIN_PASSWORD` | empty, which disables `/admin` | Basic auth password, any username |
+| `PUBLIC_PAINT` | empty, which makes the canvas view only | Set to `true` to let visitors paint |
 | `PAINT_COOLDOWN` | `30s` | Per IP and per cookie. `0s` turns it off |
 | `WIFI_SSID`, `WIFI_PASSWORD` | empty | Network prefilled on `/ink/install`. Anyone can read it from the page |
 | `TRUSTED_PROXY_HEADER` | empty (`X-Forwarded-For` in Docker) | Header the client IP comes from. Use `CF-Connecting-IP` behind Cloudflare |

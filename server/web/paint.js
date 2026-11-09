@@ -30,6 +30,7 @@
   let tool = "brush";
   let size = 1;
   let readyAt = 0;
+  let paintable = true;
   let hover = null;
   let stroke = null; // { start, last, cells: Set of indices }
   let message = null; // error shown until the next paint
@@ -296,6 +297,7 @@
 
   // ---- strokes -------------------------------------------------------------
   function startStroke(e) {
+    if (!paintable) return;
     if (Date.now() < readyAt) { tick(); return; }
     const c = cellAt(e);
     if (!c) return;
@@ -413,7 +415,7 @@
 
   const KEYS = { b: "brush", e: "eraser", o: "circle", t: "text", m: "move" };
   window.addEventListener("keydown", (e) => {
-    if (e.target.closest("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!paintable || e.target.closest("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key >= "1" && e.key <= "4") pickColor(swatches[Number(e.key) - 1]);
     else if (KEYS[e.key]) { e.preventDefault(); pickTool(KEYS[e.key]); }
     else if (e.key === "[" || e.key === "]") {
@@ -428,12 +430,28 @@
   pickTool("brush");
   pressGroup(".swatch", (b) => b.dataset.rgb && parseInt(b.dataset.rgb, 16) === color);
 
+  const paintGroups = [...document.querySelectorAll(".tools .group:not(.zoom)")];
+  function setPaintable(on) {
+    if (on === paintable) return;
+    paintable = on;
+    paintGroups.forEach((g) => { g.hidden = !on; });
+    pickTool(on ? "brush" : "move");
+    document.getElementById("paint-note").hidden = !on;
+    document.getElementById("view-note").hidden = on;
+  }
+  setPaintable(false);
+
   // ---- cooldown ------------------------------------------------------------
   function showError(text) {
     message = text;
     tick();
   }
   function tick() {
+    if (!paintable) {
+      statusEl.textContent = "view only";
+      statusEl.className = "status";
+      return;
+    }
     const left = Math.ceil((readyAt - Date.now()) / 1000);
     if (left > 0) {
       statusEl.textContent = `wait ${left}s`;
@@ -468,7 +486,8 @@
     const me = await (await fetch("/api/me", { cache: "no-store" })).json();
     readyAt = Date.now() + me.retry_after * 1000;
     document.getElementById("cooldown").textContent = Math.round(me.cooldown);
-    document.getElementById("cooldown-note").hidden = me.cooldown <= 0;
+    setPaintable(me.paint);
+    document.getElementById("cooldown-note").hidden = !me.paint || me.cooldown <= 0;
     onlineEl.textContent = me.online > 0 ? `${me.online} here` : "";
     if (!layer || !layer.src.endsWith(encodeURIComponent(me.widgets_v))) loadLayer(me.widgets_v);
     tick();

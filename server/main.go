@@ -62,6 +62,7 @@ func main() {
 		legacyHosts:   legacyHostPaths(os.Getenv("INK_LEGACY_HOST"), os.Getenv("QUADRANT_LEGACY_HOST")),
 		adminPassword: admin,
 		ipHeader:      env("TRUSTED_PROXY_HEADER", ""),
+		publicPaint:   os.Getenv("PUBLIC_PAINT") == "true",
 		wifiSSID:      os.Getenv("WIFI_SSID"),
 		wifiPassword:  os.Getenv("WIFI_PASSWORD"),
 	}

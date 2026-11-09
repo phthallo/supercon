@@ -41,6 +41,7 @@ type Server struct {
 	legacyHosts   map[string]string
 	adminPassword string
 	ipHeader      string
+	publicPaint   bool
 	// Prefilled on /install. Public: anyone can read it from the page.
 	wifiSSID     string
 	wifiPassword string
@@ -278,6 +279,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"retry_after": seconds(s.limiter.Wait(s.clientIP(r), id)),
 		"cooldown":    seconds(s.limiter.cooldown),
+		"paint":       s.publicPaint,
 		"grid":        [2]int{GridW, GridH},
 		"panel":       [2]int{PanelW, PanelH},
 		"widgets_v":   s.store.WidgetVersion(),
@@ -292,6 +294,10 @@ func (s *Server) handleCanvas(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePixel(w http.ResponseWriter, r *http.Request) {
+	if !s.publicPaint {
+		jsonError(w, http.StatusForbidden, "painting is turned off")
+		return
+	}
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		jsonError(w, http.StatusUnsupportedMediaType, "send application/json")
 		return

@@ -75,6 +75,7 @@
         <tr><td><code>DATABASE_URL</code></td><td>a <code>postgres://</code> URL. The compose file sets it.</td></tr>
         <tr><td><code>SITE_URL</code></td><td>your site's public URL, used for Quadrant claim links.</td></tr>
         <tr><td><code>ADMIN_PASSWORD</code></td><td>password for <code>/admin</code>, where you add text and images. Admin is off without it.</td></tr>
+        <tr><td><code>PUBLIC_PAINT</code></td><td><code>true</code> lets visitors paint. Anything else makes the canvas view only.</td></tr>
         <tr><td><code>PAINT_COOLDOWN</code></td><td>wait between paints, like <code>30s</code>. <code>0s</code> turns it off.</td></tr>
         <tr><td><code>WIFI_SSID</code>, <code>WIFI_PASSWORD</code></td><td>a network to prefill on this page.</td></tr>
         <tr><td><code>TRUSTED_PROXY_HEADER</code></td><td>header holding the visitor's IP behind a proxy. Defaults to <code>X-Forwarded-For</code> in the Docker image.</td></tr>

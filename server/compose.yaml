@@ -7,6 +7,7 @@ services:
       DATABASE_URL: postgres://ink:ink@db:5432/ink?sslmode=disable
       SITE_URL: ${SITE_URL:-http://localhost:8080}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      PUBLIC_PAINT: ${PUBLIC_PAINT:-false}
       PAINT_COOLDOWN: ${PAINT_COOLDOWN:-30s}
     depends_on:
       db:
