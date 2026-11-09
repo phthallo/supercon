@@ -26,11 +26,14 @@ from apps import model3d  # noqa: E402
 BUDGET_MS = 400
 
 model3d.MESH_PATH = "data/model3d/robot.obj"
+model3d.TEXTURE_PATH = "data/model3d/robot.pgm"
 app = model3d.Model3D()
+start = time.ticks_ms()
 app._launch()
 if app.error:
     raise SystemExit(app.error)
-print("mesh:", len(app.verts) // 3, "vertices,", len(app.edges) // 2, "edges")
+print("load:", time.ticks_diff(time.ticks_ms(), start), "ms")
+print("mesh:", len(app.verts) // 3, "vertices,", len(app.tris) // 6, "triangles")
 
 times = []
 for pitch in range(0, model3d.STEPS, 3):

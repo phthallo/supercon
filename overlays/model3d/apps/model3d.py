@@ -1,9 +1,11 @@
-"""Wireframe viewer for a Wavefront OBJ mesh. The README lists the controls and mesh limits."""
+"""Textured mesh viewer. The README lists the controls and the mesh and texture formats."""
 
 import array
 import asyncio as aio
 import gc
 import math
+
+import micropython
 
 from apps.base_app import BaseApp
 from lib import button
@@ -11,8 +13,9 @@ from lib.epd import display
 from lib.led_bar import leds
 
 MESH_PATH = "/data/model3d/robot.obj"
-MAX_VERTS = 512
-MAX_EDGES = 1024
+TEXTURE_PATH = "/data/model3d/robot.pgm"
+MAX_VERTS = 1024
+MAX_TRIS = 2048
 
 W, H, CX, CY = 960, 672, 480, 336
 
@@ -23,8 +26,8 @@ SIN = [round(math.sin(2 * math.pi * i / STEPS) * (1 << Q)) for i in range(STEPS)
 COS = [SIN[(i + STEPS // 4) % STEPS] for i in range(STEPS)]
 
 # Vertices are scaled to lie within RADIUS of the origin. A sphere of that radius seen from
-# DISTANCE projects to FOCAL * RADIUS / sqrt(DISTANCE^2 - RADIUS^2) = 320 px, which fits the
-# panel height at every rotation.
+# DISTANCE projects to FOCAL * RADIUS / sqrt(DISTANCE^2 - RADIUS^2) = 320 px, so every vertex
+# stays on the panel. The rasterizer relies on this: it does not clip.
 RADIUS = 1024
 DISTANCE = 3 * RADIUS
 FOCAL = 905
@@ -37,19 +40,34 @@ PRESS_STEP = ((-1, 0), (1, 0), (0, 1), (0, -1))
 
 FULL_REFRESH_LEDS = (0, 0, 1)
 
+# Fractional bits of the rasterizer's edge and texture positions.
+FX = 12
+# Sorts after any real depth key.
+NOT_DRAWN = 1 << 29
+DEPTH_OFFSET = 3 * (RADIUS + 16)
+INDEX_BITS = 12
 
-def _vertex_index(token, count):
-    i = int(token.split("/")[0])
-    i = i - 1 if i > 0 else count + i
-    if not 0 <= i < count:
-        raise ValueError("bad vertex index")
-    return i
+# 4x4 Bayer matrix as gray thresholds. A fixed screen-space pattern keeps unchanged areas
+# identical between frames, so delta frames only drive pixels that really changed.
+BAYER = bytes(v * 16 + 8 for v in (0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5))
 
 
-def load_obj(path):
-    """Read v, f and l lines. Returns (array of x,y,z in model units, array of edge index pairs)."""
+def _indices(token, verts, uvs):
+    fields = token.split("/")
+    i = int(fields[0])
+    t = int(fields[1])
+    i = i - 1 if i > 0 else verts + i
+    t = t - 1 if t > 0 else uvs + t
+    if not 0 <= i < verts or not 0 <= t < uvs:
+        raise ValueError("bad index")
+    return i, t
+
+
+def load_obj(path, tex_w, tex_h):
+    """Read v, vt and f lines. Returns arrays: x,y,z in model units; u,v in texels; v0,v1,v2,t0,t1,t2."""
     points = []
-    seen = set()
+    uvs = array.array("H")
+    tris = array.array("H")
     with open(path) as f:
         for line in f:
             fields = line.split()
@@ -60,18 +78,20 @@ def load_obj(path):
                 if len(points) == MAX_VERTS:
                     raise ValueError("too many vertices")
                 points.append((float(fields[1]), float(fields[2]), float(fields[3])))
-            elif kind == "f" or kind == "l":
-                ids = [_vertex_index(t, len(points)) for t in fields[1:]]
-                if kind == "f":
-                    ids.append(ids[0])
-                for i in range(len(ids) - 1):
-                    a, b = ids[i], ids[i + 1]
-                    if a != b:
-                        seen.add(a << 16 | b if a < b else b << 16 | a)
-                if len(seen) > MAX_EDGES:
-                    raise ValueError("too many edges")
-    if not seen:
-        raise ValueError("no edges")
+            elif kind == "vt":
+                uvs.append(min(tex_w - 1, max(0, round(float(fields[1]) * tex_w))))
+                uvs.append(min(tex_h - 1, max(0, round(float(fields[2]) * tex_h))))
+            elif kind == "f":
+                ids = [_indices(t, len(points), len(uvs) // 2) for t in fields[1:]]
+                for i in range(1, len(ids) - 1):
+                    if len(tris) // 6 == MAX_TRIS:
+                        raise ValueError("too many triangles")
+                    for corner in (ids[0], ids[i], ids[i + 1]):
+                        tris.append(corner[0])
+                    for corner in (ids[0], ids[i], ids[i + 1]):
+                        tris.append(corner[1])
+    if not tris:
+        raise ValueError("no triangles")
 
     mid = [(min(p[i] for p in points) + max(p[i] for p in points)) / 2 for i in range(3)]
     reach = 0.0
@@ -85,15 +105,25 @@ def load_obj(path):
     for p in points:
         for i in range(3):
             verts.append(round((p[i] - mid[i]) * scale))
-    edges = array.array("H")
-    for e in seen:
-        edges.append(e >> 16)
-        edges.append(e & 0xFFFF)
-    return verts, edges
+    return verts, uvs, tris
 
 
-def project(verts, screen, yaw, pitch):
-    """Write x,y screen positions into screen. Allocates nothing, so no GC pause during a frame."""
+def load_pgm(path):
+    """Read an 8-bit binary PGM. Returns (width, height, pixels)."""
+    with open(path, "rb") as f:
+        if f.readline().strip() != b"P5":
+            raise ValueError("texture is not a binary PGM")
+        w, h = (int(n) for n in f.readline().split())
+        if int(f.readline()) != 255:
+            raise ValueError("texture is not 8-bit")
+        pixels = bytearray(w * h)
+        if f.readinto(pixels) != w * h:
+            raise ValueError("texture is truncated")
+    return w, h, pixels
+
+
+def project(verts, screen, depth, yaw, pitch):
+    """Write x,y screen positions into screen and camera-facing depth into depth."""
     sy = SIN[yaw]
     cy = COS[yaw]
     sp = SIN[pitch]
@@ -110,24 +140,174 @@ def project(verts, screen, yaw, pitch):
         d = DISTANCE - rz
         screen[out] = CX + rx * FOCAL // d
         screen[out + 1] = CY - ry * FOCAL // d
+        depth[i // 3] = rz
         out += 2
 
 
-def draw_edges(fb, screen, edges):
-    """Lines are 2 px wide: 1 px lines fade under the fast delta waveform."""
-    line = fb.line
-    for i in range(0, len(edges), 2):
-        a = edges[i] * 2
-        b = edges[i + 1] * 2
-        x0 = screen[a]
-        y0 = screen[a + 1]
-        x1 = screen[b]
-        y1 = screen[b + 1]
-        line(x0, y0, x1, y1, 1)
-        if abs(x1 - x0) > abs(y1 - y0):
-            line(x0, y0 + 1, x1, y1 + 1, 1)
-        else:
-            line(x0 + 1, y0, x1 + 1, y1, 1)
+def visible_triangles(screen, depth, tris, order):
+    """Fill order with keys of front-facing triangles, farthest first. Returns how many."""
+    n = 0
+    t = 0
+    for index in range(len(tris) // 6):
+        a = tris[t]
+        b = tris[t + 1]
+        c = tris[t + 2]
+        ax = screen[a * 2]
+        ay = screen[a * 2 + 1]
+        area = (screen[b * 2] - ax) * (screen[c * 2 + 1] - ay) - (screen[c * 2] - ax) * (screen[b * 2 + 1] - ay)
+        if area < 0:
+            order[n] = (depth[a] + depth[b] + depth[c] + DEPTH_OFFSET) << INDEX_BITS | index
+            n += 1
+        t += 6
+    for i in range(n, len(order)):
+        order[i] = NOT_DRAWN
+    order.sort()
+    return n
+
+
+@micropython.viper
+def _fill_spans(fb, tex, params, bayer):
+    """Fill the rows of one flat-edged part of a triangle. Unpacks params, see Rasterizer."""
+    pixels = ptr8(fb)
+    texels = ptr8(tex)
+    p = ptr32(params)
+    thresholds = ptr8(bayer)
+    y = int(p[0])
+    y_end = int(p[1])
+    xl = int(p[2])
+    dxl = int(p[3])
+    xr = int(p[4])
+    dxr = int(p[5])
+    ul = int(p[6])
+    dul = int(p[7])
+    vl = int(p[8])
+    dvl = int(p[9])
+    dux = int(p[10])
+    dvx = int(p[11])
+    tex_w = int(p[12])
+    tex_size = uint(p[13])
+    # ptr32 loads zero-extend on the 64-bit simulator. wrap is 2^32 there and 0 on the badge.
+    wrap = 0x10000
+    wrap = wrap * wrap
+    dxl -= ((dxl >> 31) & 1) * wrap
+    dxr -= ((dxr >> 31) & 1) * wrap
+    ul -= ((ul >> 31) & 1) * wrap
+    dul -= ((dul >> 31) & 1) * wrap
+    vl -= ((vl >> 31) & 1) * wrap
+    dvl -= ((dvl >> 31) & 1) * wrap
+    dux -= ((dux >> 31) & 1) * wrap
+    dvx -= ((dvx >> 31) & 1) * wrap
+    while y < y_end:
+        x = (xl + 4095) >> 12
+        x_end = (xr + 4095) >> 12
+        u = ul
+        v = vl
+        row = y * 120
+        band = (y & 3) << 2
+        while x < x_end:
+            t = (v >> 12) * tex_w + (u >> 12)
+            if uint(t) < tex_size:
+                at = row + (x >> 3)
+                mask = 0x80 >> (x & 7)
+                if texels[t] < thresholds[band | (x & 3)]:
+                    pixels[at] = pixels[at] | mask
+                else:
+                    pixels[at] = pixels[at] & (mask ^ 0xFF)
+            u += dux
+            v += dvx
+            x += 1
+        xl += dxl
+        xr += dxr
+        ul += dul
+        vl += dvl
+        y += 1
+
+
+class Rasterizer:
+    def __init__(self, fb, tex, tex_w, tex_h):
+        self.fb = fb
+        self.tex = tex
+        self.p = array.array("i", [0] * 14)
+        self.p[12] = tex_w
+        self.p[13] = tex_w * tex_h
+
+    def triangle(self, x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2):
+        """Fill a triangle whose corners are sorted by y."""
+        height = y2 - y0
+        dy1 = y1 - y0
+        denom = (x1 - x0) * height - (x2 - x0) * dy1
+        if denom == 0:
+            return
+        p = self.p
+        p[10] = (((u1 - u0) * height - (u2 - u0) * dy1) << FX) // denom
+        p[11] = (((v1 - v0) * height - (v2 - v0) * dy1) << FX) // denom
+        fx0 = x0 << FX
+        fu0 = u0 << FX
+        fv0 = v0 << FX
+        long_dx = ((x2 - x0) << FX) // height
+        long_du = ((u2 - u0) << FX) // height
+        long_dv = ((v2 - v0) << FX) // height
+        # denom > 0 means vertex 1 is right of the long edge.
+        long_is_left = denom > 0
+        if dy1 > 0:
+            dx = ((x1 - x0) << FX) // dy1
+            if long_is_left:
+                self._spans(y0, y1, fx0, long_dx, fu0, long_du, fv0, long_dv, fx0, dx)
+            else:
+                du = ((u1 - u0) << FX) // dy1
+                dv = ((v1 - v0) << FX) // dy1
+                self._spans(y0, y1, fx0, dx, fu0, du, fv0, dv, fx0, long_dx)
+        if y2 > y1:
+            lower = y2 - y1
+            dx = ((x2 - x1) << FX) // lower
+            long_x = fx0 + long_dx * dy1
+            if long_is_left:
+                self._spans(y1, y2, long_x, long_dx, fu0 + long_du * dy1, long_du, fv0 + long_dv * dy1, long_dv, x1 << FX, dx)
+            else:
+                du = ((u2 - u1) << FX) // lower
+                dv = ((v2 - v1) << FX) // lower
+                self._spans(y1, y2, x1 << FX, dx, u1 << FX, du, v1 << FX, dv, long_x, long_dx)
+
+    def _spans(self, y, y_end, xl, dxl, ul, dul, vl, dvl, xr, dxr):
+        p = self.p
+        p[0] = y
+        p[1] = y_end
+        p[2] = xl
+        p[3] = dxl
+        p[4] = xr
+        p[5] = dxr
+        p[6] = ul
+        p[7] = dul
+        p[8] = vl
+        p[9] = dvl
+        _fill_spans(self.fb, self.tex, p, BAYER)
+
+
+def draw_triangles(raster, screen, uvs, tris, order, count):
+    for i in range(count):
+        t = (order[i] & ((1 << INDEX_BITS) - 1)) * 6
+        a = tris[t] * 2
+        b = tris[t + 1] * 2
+        c = tris[t + 2] * 2
+        ta = tris[t + 3] * 2
+        tb = tris[t + 4] * 2
+        tc = tris[t + 5] * 2
+        # Swaps stay at two values: larger ones allocate a tuple, and the resulting garbage
+        # collections stall a frame for 2-3 seconds.
+        if screen[b + 1] < screen[a + 1]:
+            a, b = b, a
+            ta, tb = tb, ta
+        if screen[c + 1] < screen[a + 1]:
+            a, c = c, a
+            ta, tc = tc, ta
+        if screen[c + 1] < screen[b + 1]:
+            b, c = c, b
+            tb, tc = tc, tb
+        raster.triangle(
+            screen[a], screen[a + 1], uvs[ta], uvs[ta + 1],
+            screen[b], screen[b + 1], uvs[tb], uvs[tb + 1],
+            screen[c], screen[c + 1], uvs[tc], uvs[tc + 1],
+        )
 
 
 class Model3D(BaseApp):
@@ -136,23 +316,30 @@ class Model3D(BaseApp):
     def __init__(self):
         super().__init__("3D Model")
         self.verts = None
-        self.edges = None
-        self.screen = None
         self.error = None
         self.yaw = START_YAW
         self.pitch = START_PITCH
         self.dirty = False
 
+    def _load(self):
+        try:
+            tex_w, tex_h, tex = load_pgm(TEXTURE_PATH)
+            self.verts, self.uvs, self.tris = load_obj(MESH_PATH, tex_w, tex_h)
+            count = len(self.verts) // 3
+            self.screen = array.array("h", bytes(count * 4))
+            self.depth = array.array("h", bytes(count * 2))
+            self.order = [NOT_DRAWN] * (len(self.tris) // 6)
+            self.raster = Rasterizer(display.black, tex, tex_w, tex_h)
+            self.error = None
+        except (OSError, ValueError, IndexError, MemoryError) as ex:
+            print("model3d: can't load mesh", ex)
+            self.verts = None
+            self.error = "Can't load model: %s" % ex
+        gc.collect()
+
     def _launch(self):
         if self.verts is None:
-            try:
-                self.verts, self.edges = load_obj(MESH_PATH)
-                self.screen = array.array("h", bytes(len(self.verts) // 3 * 4))
-                self.error = None
-            except (OSError, ValueError, IndexError, MemoryError) as ex:
-                print("model3d: can't load", MESH_PATH, ex)
-                self.error = "Can't load %s: %s" % (MESH_PATH, ex)
-            gc.collect()
+            self._load()
         # The button press that launched the app is still in the queue.
         button.clear_presses()
         display.red.fill(0)
@@ -176,8 +363,9 @@ class Model3D(BaseApp):
         if self.error:
             fb.text(self.error, 16, CY, 1)
             return
-        project(self.verts, self.screen, self.yaw, self.pitch)
-        draw_edges(fb, self.screen, self.edges)
+        project(self.verts, self.screen, self.depth, self.yaw, self.pitch)
+        count = visible_triangles(self.screen, self.depth, self.tris, self.order)
+        draw_triangles(self.raster, self.screen, self.uvs, self.tris, self.order, count)
 
     async def _show_frame(self):
         self.dirty = False

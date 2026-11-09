@@ -22,7 +22,9 @@ SETTLED_MS = 12000
 SPACING_MS = 1200
 # Inside the launch frame's full refresh.
 BURST_START_MS = 4500
-BURST_SPACING_MS = 100
+# The simulator replays input late under load. Tighter spacing can push a button's edges inside
+# the 15 ms bounce window in lib.button, which drops the press.
+BURST_SPACING_MS = 150
 # Nets out to yaw -2, pitch +1.
 SEQUENCE = ["plus", "plus", "a", "minus", "plus", "a", "b"]
 
@@ -62,6 +64,7 @@ def run(name, lines, exit_after):
 
 def seconds_for(presses, start, spacing):
     return (start + presses * spacing) // 1000 + 4
+
 
 
 def main():

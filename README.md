@@ -11,9 +11,9 @@ Modified firmware for the [Supercon 2026 Billboard eink badge](https://github.co
 
 ## 3D model viewer
 
-The `model3d` overlay draws a mesh as a black wireframe. Each press orbits the view by 15 degrees: Menu + and Menu - change yaw, User A and User B change pitch. Hold both menu buttons to return to the app menu. The LEDs light blue during a full refresh, which takes about 6 seconds; presses made during one are applied to the next frame.
+The `model3d` overlay draws a textured mesh in dithered black and white. Each press orbits the view by 15 degrees: Menu + and Menu - change yaw, User A and User B change pitch. Hold both menu buttons to return to the app menu. The LEDs light blue during a full refresh, which takes about 6 seconds; presses made during one are applied to the next frame.
 
-The mesh is `overlays/model3d/data/model3d/robot.obj`, a Wavefront OBJ file. Only `v`, `f` and `l` lines are read, and it can have up to 512 vertices and 1024 unique edges. It is parsed once at launch and scaled to fit the screen at every rotation. Rotation uses integer math with a sine table, so the view is an exact function of the number of presses.
+The mesh is `overlays/model3d/data/model3d/robot.obj`, a Wavefront OBJ file, and its texture is `robot.pgm` next to it, an 8-bit binary PGM. Only `v`, `vt` and `f` lines are read, every face corner needs a texture coordinate, `vt` v counts down from the top row of the PGM, and the mesh can have up to 1024 vertices and 2048 triangles. Both files are read once at launch and the mesh is scaled to fit the screen at every rotation. Rotation uses integer math with a sine table, so the view is an exact function of the number of presses.
 
 `tools/model3d_check.py` tests the input handling in the simulator. `tools/model3d_bench.py` measures draw time on the badge.
 
